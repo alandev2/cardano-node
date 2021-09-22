@@ -21,9 +21,12 @@
     #   };
     # };
     customConfig.url = "github:input-output-hk/empty-flake";
+
+    mainnet-chain.url = "path:/home/clever/chain";
+    mainnet-chain.flake = false;
   };
 
-  outputs = { self, nixpkgs, utils, haskellNix, iohkNix, customConfig }:
+  outputs = { self, nixpkgs, utils, haskellNix, iohkNix, customConfig, mainnet-chain }:
     let
       inherit (nixpkgs) lib;
       inherit (lib) head systems mapAttrs recursiveUpdate mkDefault
@@ -92,6 +95,7 @@
         packages = {
           inherit (devShell) devops;
           inherit (pkgs) cardano-node-profiled cardano-node-eventlogged cardano-node-asserted tx-generator-profiled locli-profiled;
+          membench = pkgs.callPackage ./membench.nix { inherit mainnet-chain; };
         }
         // scripts
         // exes

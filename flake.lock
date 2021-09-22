@@ -200,6 +200,18 @@
         "type": "github"
       }
     },
+    "mainnet-chain": {
+      "flake": false,
+      "locked": {
+        "narHash": "sha256-fyomo9Dl9ShXp44iBoNmuE5kJOmELJ9A+LN0Aj2rb9U=",
+        "path": "/home/clever/chain",
+        "type": "path"
+      },
+      "original": {
+        "path": "/home/clever/chain",
+        "type": "path"
+      }
+    },
     "nix-tools": {
       "flake": false,
       "locked": {
@@ -302,6 +314,7 @@
         "customConfig": "customConfig",
         "haskellNix": "haskellNix",
         "iohkNix": "iohkNix",
+        "mainnet-chain": "mainnet-chain",
         "nixpkgs": [
           "haskellNix",
           "nixpkgs-2105"
