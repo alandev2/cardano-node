@@ -13,6 +13,8 @@ runCommand "membench" {
   chmod +w chain chain/immutable
   rm chain/immutable/01861.*
   cp ${mainnet-chain}/immutable/01861.* chain/immutable -vi
+  chmod +w chain/immutable/01861.*
+
   ls -ltrh chain
   jq '.setupScribes = [
       .setupScribes[0] * { "scFormat":"ScJson" },
@@ -30,7 +32,11 @@ runCommand "membench" {
     | .defaultScribes = .defaultScribes + [ [ "FileSK", "log.json" ] ]
     ' ${./configuration/cardano/mainnet-config.json} > config.json
   cp -v ${./configuration/cardano}/*-genesis.json .
-  cardano-node run --database-path chain/ --config config.json --topology $topologyPath --shutdown-on-slot-synced 2000
+  cardano-node run --database-path chain/ --config config.json --topology $topologyPath --shutdown-on-slot-synced 2000 &
+  sleep 3600
+  kill -int $!
   pwd
   ls -ltrh
+  mkdir $out
+  mv -vi log*json config.json $out/
 ''
