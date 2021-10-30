@@ -4,15 +4,14 @@
 ## The backend is an attrset of AWS/supervisord-specific methods and parameters.
 , backend
 
-## Environmental settings:
-##   - either affect semantics on all backends equally,
-##   - or have no semantic effect
-, environment
+## The cardano-node config used as baseline:
+, baseNodeConfig
 
 , profile
 }:
 
 with pkgs.lib;
+with (import ../lib.nix pkgs.lib);
 
 let
 
@@ -35,74 +34,74 @@ let
     {
       inherit port;
 
-      forceHardForks =
-        {
-          shelley = { Shelley = 0; };
-          allegra = { Shelley = 0; Allegra = 0; };
-          mary    = { Shelley = 0; Allegra = 0; Mary = 0; };
-          alonzo  = { Shelley = 0; Allegra = 0; Mary = 0; Alonzo = 0; };
-        }.${profile.value.era};
-
+      ## For the definition of 'nodeConfigBits', please see below.
       nodeConfig =
        backend.finaliseNodeConfig nodeSpec
-         ((removeAttrs
-           (recursiveUpdate environment.cardanoLib.environments.testnet.nodeConfig
-             {
-               Protocol             = "Cardano";
-               RequiresNetworkMagic = "RequiresMagic";
+         (recursiveUpdate
+           nodeConfigBits.base
+           (if __hasAttr "preset" profile.value
+            then readJSONMay (./presets + "/${profile.value.preset}/config.json")
+            else nodeConfigBits.era_setup_hardforks //
+                 nodeConfigBits.logging));
+    };
 
-               TracingVerbosity     = "NormalVerbosity";
-               minSeverity          = "Debug";
+    nodeConfigBits = rec {
+      base =
+        ## General config bits needed for base workbench functionality.
+        removeAttrs
+          baseNodeConfig
+          [ "AlonzoGenesisHash"
+            "ByronGenesisHash"
+            "ShelleyGenesisHash"
+          ]
+        //
+        {
+          TestEnableDevelopmentHardForkEras     = true;
+          TestEnableDevelopmentNetworkProtocols = true;
 
-               TraceMempool         = true;
-               TraceTxInbound       = true;
+          defaultScribes = [
+            [ "StdoutSK" "stdout" ]
+          ];
+          setupScribes =
+            [{
+              scKind   = "StdoutSK";
+              scName   = "stdout";
+              scFormat = "ScJson";
+            }];
+        };
+      era_setup_hardforks = {
+        shelley =
+          { TestShelleyHardForkAtEpoch = 0;
+          };
+        allegra =
+          { TestShelleyHardForkAtEpoch = 0;
+            TestAllegraHardForkAtEpoch = 0;
+          };
+        mary =
+          { TestShelleyHardForkAtEpoch = 0;
+            TestAllegraHardForkAtEpoch = 0;
+            TestMaryHardForkAtEpoch    = 0;
+          };
+        alonzo =
+          { TestShelleyHardForkAtEpoch = 0;
+            TestAllegraHardForkAtEpoch = 0;
+            TestMaryHardForkAtEpoch    = 0;
+            TestAlonzoHardForkAtEpoch  = 0;
+          };
+      }.${profile.value.era};
+      logging =
+        {
+          minSeverity                 = "Debug";
 
-               defaultScribes = [
-                 [ "StdoutSK" "stdout" ]
-               ];
-               setupScribes =
-                 [{
-                   scKind     = "StdoutSK";
-                   scName     = "stdout";
-                   scFormat   = "ScJson";
-                 }];
-               options = {
-                 mapBackends = {
-                   "cardano.node.resources" = [ "KatipBK" ];
-                 };
-               };
+          TraceMempool                = true;
+          TraceTxInbound              = true;
 
-               LastKnownBlockVersion-Major = 0;
-               LastKnownBlockVersion-Minor = 0;
-               LastKnownBlockVersion-Alt   = 0;
-             })
-           [ "AlonzoGenesisHash"
-             "ByronGenesisHash"
-             "ShelleyGenesisHash"
-           ])
-       //
-       ({
-         shelley =
-           { TestShelleyHardForkAtEpoch = 0;
-           };
-         allegra =
-           { TestShelleyHardForkAtEpoch = 0;
-             TestAllegraHardForkAtEpoch = 0;
-           };
-         mary =
-           { TestShelleyHardForkAtEpoch = 0;
-             TestAllegraHardForkAtEpoch = 0;
-             TestMaryHardForkAtEpoch    = 0;
-           };
-         alonzo =
-           { TestShelleyHardForkAtEpoch = 0;
-             TestAllegraHardForkAtEpoch = 0;
-             TestMaryHardForkAtEpoch    = 0;
-             TestAlonzoHardForkAtEpoch  = 0;
-             TestEnableDevelopmentHardForkEras     = true;
-             TestEnableDevelopmentNetworkProtocols = true;
-           };
-       }).${profile.value.era});
+          options = {
+            mapBackends = {
+              "cardano.node.resources" = [ "KatipBK" ];
+            };
+          };
+        };
     };
 
   ## Given an env config, evaluate it and produce the node service.
@@ -133,60 +132,62 @@ let
     };
     in eval.config.services.cardano-node;
 
+  nodeSpecService =
+    { name, i, mode ? null, ... }@nodeSpec:
+    let
+      modeIdSuffix  = if mode == null then "" else "." + mode;
+      serviceConfig = nodeSpecServiceConfig    nodeSpec;
+      service       = nodeServiceConfigService serviceConfig;
+    in {
+      nodeSpec = {
+        value = nodeSpec;
+        JSON  = runJq "node-spec-${name + modeIdSuffix}.json"
+                  ''--null-input --sort-keys
+                    --argjson x '${__toJSON nodeSpec}'
+                  '' "$x";
+      };
+
+      serviceConfig = {
+        value = serviceConfig;
+        JSON  = runJq "node-service-config-${name + modeIdSuffix}.json"
+                  ''--null-input --sort-keys
+                    --argjson x '${__toJSON serviceConfig}'
+                  '' "$x";
+      };
+
+      service = {
+        value = service;
+        JSON  = runJq "node-service-${name + modeIdSuffix}.json"
+                  ''--null-input --sort-keys
+                    --argjson x '${__toJSON service}'
+                  '' "$x";
+      };
+
+      nodeConfig = {
+        value = service.nodeConfig;
+        JSON  = runJq "node-config-${name + modeIdSuffix}.json"
+                  ''--null-input --sort-keys
+                    --argjson x '${__toJSON service.nodeConfig}'
+                  '' "$x";
+      };
+
+      topology = rec {
+        JSON  = backend.topologyForNodeSpec { inherit profile nodeSpec; };
+        value = __fromJSON (__readFile JSON);
+      };
+
+      startupScript =
+        pkgs.writeScript "startup-${name}.sh"
+          ''
+          #!${pkgs.stdenv.shell}
+
+          ${service.script}
+          '';
+    };
   ##
   ## node-services :: Map NodeName (NodeSpec, ServiceConfig, Service, NodeConfig, Script)
   ##
-  node-services = mapAttrs
-    (_: { name, i, ... }@nodeSpec:
-      let
-        serviceConfig = nodeSpecServiceConfig    nodeSpec;
-        service       = nodeServiceConfigService serviceConfig;
-      in {
-        nodeSpec = {
-          value = nodeSpec;
-          JSON  = runJq "node-spec-${name}.json"
-                    ''--null-input --sort-keys
-                      --argjson x '${__toJSON nodeSpec}'
-                    '' "$x";
-        };
-
-        serviceConfig = {
-          value = serviceConfig;
-          JSON  = runJq "node-service-config-${name}.json"
-                    ''--null-input --sort-keys
-                      --argjson x '${__toJSON serviceConfig}'
-                    '' "$x";
-        };
-
-        service = {
-          value = service;
-          JSON  = runJq "node-service-${name}.json"
-                    ''--null-input --sort-keys
-                      --argjson x '${__toJSON service}'
-                    '' "$x";
-        };
-
-        nodeConfig = {
-          value = service.nodeConfig;
-          JSON  = runJq "node-config-${name}.json"
-                    ''--null-input --sort-keys
-                      --argjson x '${__toJSON service.nodeConfig}'
-                    '' "$x";
-        };
-
-        topology = rec {
-          JSON  = backend.topologyForNode { inherit profile nodeSpec; };
-          value = __fromJSON (__readFile JSON);
-        };
-
-        startupScript =
-          pkgs.writeScript "startup-${name}.sh"
-            ''
-            #!${pkgs.stdenv.shell}
-
-            ${service.script}
-            '';
-      })
+  node-services = mapAttrs (_: nodeSpecService)
     profile.node-specs.value;
 in
 {
