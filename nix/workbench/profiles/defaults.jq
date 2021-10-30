@@ -1,10 +1,13 @@
 ## Testable with:
 ##
-##   jq -n 'include "defaults" { search: "nix/supervisord-cluster/profiles" }; era_defaults("shelley")'
+##   jq -n 'include "defaults" { search: "nix/supervisord-cluster/profiles" }; era_defaults("alonzo")'
 ##
 def era_defaults($era):
 { common:
   { era:                              $era
+
+  ## Choice of a cluster run scenario (wb scenario --help):
+  , scenario:                         "default"
 
   ## Cluster topology and composition:
   , composition:
@@ -13,6 +16,7 @@ def era_defaults($era):
     , n_singular_hosts:               1
     , n_dense_hosts:                  1
     , dense_pool_density:             1
+    , with_proxy:                     false
     , with_observer:                  true
     }
 
@@ -34,6 +38,7 @@ def era_defaults($era):
     , epoch_length:                   2200   # Ought to be at least (10 * k / f).
     , parameter_k:                    10
     , slot_duration:                  1
+    , genesis_future_offset:          "3 seconds"
 
     ## Block size & contents
     , max_block_size:                 64000
