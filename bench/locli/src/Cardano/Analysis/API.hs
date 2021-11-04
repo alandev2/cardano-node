@@ -18,9 +18,11 @@ import Text.Printf              (printf)
 
 import Ouroboros.Network.Block  (BlockNo(..), SlotNo(..))
 
+import Cardano.Analysis.ChainFilter
 import Cardano.Analysis.Profile
 import Cardano.Unlog.LogObject  hiding (Text)
 import Cardano.Unlog.Render
+import Cardano.Unlog.SlotStats
 
 import Data.Distribution
 
@@ -126,17 +128,21 @@ data BPErrorKind
 --
 -- * Key properties
 --
-isValidBlockEvent :: Profile -> [BlockCond] -> BlockEvents -> Bool
-isValidBlockEvent Profile{genesis=GenesisProfile{..}} criteria be =
-  all (testCriterion be) criteria
- where
-   testCriterion :: BlockEvents -> BlockCond -> Bool
-   testCriterion BlockEvents{beForge=BlockForge{..},..} = \case
-     BCUnitaryChainDelta    -> bfChainDelta == 1
-     BCBlockFullnessAbove f ->
-       bfBlockSize >= floor ((fromIntegral max_block_size :: Double) * f)
-     BCSinceSlot s -> beSlotNo >= s
-     BCUntilSlot s -> beSlotNo <= s
+testBlockEvents :: Profile -> BlockEvents -> ChainFilter -> Bool
+testBlockEvents Profile{genesis=GenesisProfile{..}}
+                BlockEvents{beForge=BlockForge{..},..} = \case
+  CBlock flt -> case flt of
+    BUnitaryChainDelta -> bfChainDelta == 1
+    BFullnessAbove f ->
+      bfBlockSize >= floor ((fromIntegral max_block_size :: Double) * f)
+  CSlot flt -> case flt of
+    SSince s -> beSlotNo >= s
+    SUntil s -> beSlotNo <= s
+    _ -> True
+
+isValidBlockEvent :: Profile -> [ChainFilter] -> BlockEvents -> Bool
+isValidBlockEvent p criteria be =
+  all (testBlockEvents p be) criteria
 
 isValidBlockObservation :: BlockObservation -> Bool
 isValidBlockObservation BlockObservation{..} =

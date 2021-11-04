@@ -31,10 +31,9 @@ import Graphics.Gnuplot.Frame.OptionSet qualified as Opts
 
 import Text.Printf
 
-import Ouroboros.Network.Block (SlotNo)
-
 import Cardano.Analysis.API
 import Cardano.Analysis.BlockProp
+import Cardano.Analysis.ChainFilter
 import Cardano.Analysis.MachTimeline
 import Cardano.Analysis.Profile
 import Cardano.Unlog.Commands
@@ -44,9 +43,10 @@ import Cardano.Unlog.SlotStats
 
 
 data AnalysisCmdError
-  = AnalysisCmdError  !Text
-  | RunMetaParseError !JsonRunMetafile !Text
-  | GenesisParseError !JsonGenesisFile !Text
+  = AnalysisCmdError                         !Text
+  | RunMetaParseError      !JsonRunMetafile  !Text
+  | GenesisParseError      !JsonGenesisFile  !Text
+  | ChainFiltersParseError !JsonSelectorFile !Text
   deriving Show
 
 renderAnalysisCmdError :: AnalysisCommand -> AnalysisCmdError -> Text
@@ -61,6 +61,9 @@ renderAnalysisCmdError cmd err =
     GenesisParseError (JsonGenesisFile fp) err' -> renderError cmd err'
       ("Genesis parse failed: " <> T.pack fp)
       pure
+    ChainFiltersParseError (JsonSelectorFile fp) err' -> renderError cmd err'
+      ("Chain filter list parse failed: " <> T.pack fp)
+      pure
  where
    renderError :: AnalysisCommand -> a -> Text -> (a -> [Text]) -> Text
    renderError cmd' cmdErr desc renderer =
@@ -74,7 +77,7 @@ renderAnalysisCmdError cmd err =
 -- Analysis command dispatch
 --
 runAnalysisCommand :: AnalysisCommand -> ExceptT AnalysisCmdError IO ()
-runAnalysisCommand (MachineTimelineCmd genesisFile metaFile logfiles oFiles mStartSlot mEndSlot) = do
+runAnalysisCommand (MachineTimelineCmd genesisFile metaFile mChFiltersFile logfiles oFiles) = do
   chainInfo <-
     ChainInfo
       <$> firstExceptT (RunMetaParseError metaFile . T.pack)
@@ -83,9 +86,16 @@ runAnalysisCommand (MachineTimelineCmd genesisFile metaFile logfiles oFiles mSta
       <*> firstExceptT (GenesisParseError genesisFile . T.pack)
                        (newExceptT $
                         AE.eitherDecode @Genesis <$> LBS.readFile (unJsonGenesisFile genesisFile))
+  chFilters <- fmap (fromMaybe []) $
+    forM mChFiltersFile $
+      \(JsonSelectorFile f) -> do
+        firstExceptT (RunMetaParseError metaFile . T.pack)
+                     (newExceptT $
+                        AE.eitherDecode @[ChainFilter] <$> LBS.readFile f)
+
   firstExceptT AnalysisCmdError $
-    runMachineTimeline chainInfo logfiles oFiles mStartSlot mEndSlot
-runAnalysisCommand (BlockPropagationCmd genesisFile metaFile blockConds logfiles oFiles) = do
+    runMachineTimeline chainInfo logfiles chFilters oFiles
+runAnalysisCommand (BlockPropagationCmd genesisFile metaFile mChFiltersFile logfiles oFiles) = do
   chainInfo <-
     ChainInfo
       <$> firstExceptT (RunMetaParseError metaFile . T.pack)
@@ -94,16 +104,23 @@ runAnalysisCommand (BlockPropagationCmd genesisFile metaFile blockConds logfiles
       <*> firstExceptT (GenesisParseError genesisFile . T.pack)
                        (newExceptT $
                         AE.eitherDecode @Genesis <$> LBS.readFile (unJsonGenesisFile genesisFile))
+  chFilters <- fmap (fromMaybe []) $
+    forM mChFiltersFile $
+      \(JsonSelectorFile f) -> do
+        firstExceptT (RunMetaParseError metaFile . T.pack)
+                     (newExceptT $
+                        AE.eitherDecode @[ChainFilter] <$> LBS.readFile f)
+
   firstExceptT AnalysisCmdError $
-    runBlockPropagation chainInfo blockConds logfiles oFiles
+    runBlockPropagation chainInfo chFilters logfiles oFiles
 runAnalysisCommand SubstringKeysCmd =
   liftIO $ mapM_ putStrLn logObjectStreamInterpreterKeys
 
 runBlockPropagation ::
-  ChainInfo -> [BlockCond] -> [JsonLogfile] -> BlockPropagationOutputFiles -> ExceptT Text IO ()
-runBlockPropagation cInfo blockConds logfiles BlockPropagationOutputFiles{..} = do
+  ChainInfo -> [ChainFilter] -> [JsonLogfile] -> BlockPropagationOutputFiles -> ExceptT Text IO ()
+runBlockPropagation cInfo chConds logfiles BlockPropagationOutputFiles{..} = do
   liftIO $ do
-    putStrLn ("runBlockPropagation: lifting LO streams" :: Text)
+    progress "inputs" (L $ unJsonLogfile <$> logfiles)
     -- 0. Recover LogObjects
     objLists :: [(JsonLogfile, [LogObject])] <- flip mapConcurrently logfiles
       (joinT . (pure &&& readLogObjectStream))
@@ -111,16 +128,15 @@ runBlockPropagation cInfo blockConds logfiles BlockPropagationOutputFiles{..} = 
     forM_ bpofLogObjects . const $ do
       flip mapConcurrently objLists $
         \(JsonLogfile f, objs) -> do
-            putStrLn ("runBlockPropagation: dumping LO streams" :: Text)
             dumpLOStream objs
               (JsonOutputFile $ F.dropExtension f <> ".logobjects.json")
 
-    blockPropagation <- blockProp cInfo blockConds objLists
+    blockPropagation <- blockProp cInfo chConds objLists
 
     forM_ bpofTimelinePretty $
       \(TextOutputFile f) ->
         withFile f WriteMode $ \hnd -> do
-          putStrLn ("runBlockPropagation: dumping pretty timeline" :: Text)
+          progress "pretty-timeline" (Q f)
           hPutStrLn hnd . T.pack $ printf "--- input: %s" f
           mapM_ (T.hPutStrLn hnd)
             (renderDistributions (cProfile cInfo) RenderPretty blockPropagation)
@@ -130,17 +146,30 @@ runBlockPropagation cInfo blockConds logfiles BlockPropagationOutputFiles{..} = 
     forM_ bpofAnalysis $
       \(JsonOutputFile f) ->
         withFile f WriteMode $ \hnd -> do
-          putStrLn ("runBlockPropagation: dumping analysis core" :: Text)
+          progress "analysis" (Q f)
           LBS.hPutStrLn hnd (AE.encode blockPropagation)
  where
    joinT :: (IO a, IO b) -> IO (a, b)
    joinT (a, b) = (,) <$> a <*> b
 
+data F
+  = R String
+  | Q String
+  | L [String]
+
+progress :: String -> F -> IO ()
+progress key = putStrLn . T.pack . \case
+  R x  -> printf "{ \"%s\":  %s }"    key x
+  Q x  -> printf "{ \"%s\": \"%s\" }" key x
+  L xs -> printf "{ \"%s\": \"%s\" }" key (intercalate "\", \"" xs)
+
 runMachineTimeline ::
-  ChainInfo -> [JsonLogfile] -> MachineTimelineOutputFiles -> Maybe SlotNo -> Maybe SlotNo -> ExceptT Text IO ()
-runMachineTimeline chainInfo logfiles MachineTimelineOutputFiles{..} mStartSlot mEndSlot = do
+  ChainInfo -> [JsonLogfile] -> [ChainFilter] -> MachineTimelineOutputFiles -> ExceptT Text IO ()
+runMachineTimeline chainInfo logfiles chFilters MachineTimelineOutputFiles{..} = do
   liftIO $ do
+
     -- 0. Recover LogObjects
+    progress "inputs" (L $ unJsonLogfile <$> logfiles)
     objs :: [LogObject] <- concat <$> mapM readLogObjectStream logfiles
     forM_ mtofLogObjects
       (dumpLOStream objs)
@@ -148,12 +177,13 @@ runMachineTimeline chainInfo logfiles MachineTimelineOutputFiles{..} mStartSlot 
     -- 1. Derive the basic scalars and vectors
     let (,) runStats noisySlotStats = timelineFromLogObjects chainInfo objs
     forM_ mtofSlotStats $
-      \(JsonOutputFile f) ->
+      \(JsonOutputFile f) -> do
+        progress "raw-slots" (Q f)
         withFile f WriteMode $ \hnd ->
           forM_ noisySlotStats $ LBS.hPutStrLn hnd . AE.encode
 
     -- 2. Reprocess the slot stats
-    let slotStats = cleanupSlotStats mStartSlot mEndSlot noisySlotStats
+    let slotStats = filterSlotStats chFilters noisySlotStats
 
     -- 3. Derive the timeline
     let drvVectors0, _drvVectors1 :: [DerivedSlot]
@@ -165,7 +195,7 @@ runMachineTimeline chainInfo logfiles MachineTimelineOutputFiles{..} mStartSlot 
 
     -- 4. Render various outputs
     forM_ mtofTimelinePretty
-      (renderPrettyMachTimeline slotStats timeline logfiles)
+      (renderPrettyMachTimeline slotStats timeline)
     forM_ mtofStatsCsv
       (renderExportStats runStats timeline)
     forM_ mtofTimelineCsv
@@ -179,9 +209,24 @@ runMachineTimeline chainInfo logfiles MachineTimelineOutputFiles{..} mStartSlot 
     flip (maybe $ LBS.putStrLn timelineOutput) mtofAnalysis $
       \case
         JsonOutputFile f ->
-          withFile f WriteMode $ \hnd ->
+          withFile f WriteMode $ \hnd -> do
+            progress "analysis" (Q f)
             LBS.hPutStrLn hnd timelineOutput
  where
+   -- | Use the supplied chain filters.
+   --
+   --   The idea is that the initial part is useless until the node actually starts
+   --   to interact with the blockchain, so we drop all slots until they start
+   --   getting non-zero chain density reported.
+   --
+   --   On the trailing part, we drop everything since the last leadership check.
+   filterSlotStats :: [ChainFilter] -> [SlotStats] -> [SlotStats]
+   filterSlotStats chFilters =
+     filter (\x -> all (testSlotStats p x) slotFilters)
+    where
+      slotFilters :: [SlotCond]
+      slotFilters = catSlotFilters chFilters
+
    p = cProfile chainInfo
 
    renderHistogram :: Integral a
@@ -194,19 +239,19 @@ runMachineTimeline chainInfo logfiles MachineTimelineOutputFiles{..} mStartSlot 
              Hist.defOpts hist
 
    renderPrettyMachTimeline ::
-        [SlotStats] -> MachTimeline -> [JsonLogfile] -> TextOutputFile -> IO ()
-   renderPrettyMachTimeline xs s srcs o =
-     withFile (unTextOutputFile o) WriteMode $ \hnd -> do
-       hPutStrLn hnd . T.pack $
-         printf "--- input: %s" (intercalate " " $ unJsonLogfile <$> srcs)
+        [SlotStats] -> MachTimeline -> TextOutputFile -> IO ()
+   renderPrettyMachTimeline xs s (TextOutputFile f) =
+     withFile f WriteMode $ \hnd -> do
+       progress "pretty-timeline" (Q f)
        mapM_ (T.hPutStrLn hnd)
          (renderDistributions p RenderPretty s)
        mapM_ (T.hPutStrLn hnd)
          (renderTimeline p xs)
    renderExportStats :: RunScalars -> MachTimeline -> CsvOutputFile -> IO ()
-   renderExportStats rs s (CsvOutputFile o) =
-     withFile o WriteMode $
+   renderExportStats rs s (CsvOutputFile f) =
+     withFile f WriteMode $
        \h -> do
+         progress "csv-stats" (Q f)
          mapM_ (hPutStrLn h)
            (renderDistributions p RenderCsv s)
          mapM_ (hPutStrLn h) $
@@ -220,15 +265,17 @@ runMachineTimeline chainInfo logfiles MachineTimelineOutputFiles{..} mStartSlot 
      --   mapM_ (T.hPutStrLn hnd) (renderTimeline xs)
 
    renderDerivedSlots :: [DerivedSlot] -> CsvOutputFile -> IO ()
-   renderDerivedSlots slots (CsvOutputFile o) = do
-     withFile o WriteMode $ \hnd -> do
+   renderDerivedSlots slots (CsvOutputFile f) = do
+     withFile f WriteMode $ \hnd -> do
+       progress "derived-slots" (Q f)
        hPutStrLn hnd derivedSlotsHeader
        forM_ slots $
          hPutStrLn hnd . renderDerivedSlot
 
 dumpLOStream :: [LogObject] -> JsonOutputFile -> IO ()
-dumpLOStream objs o =
-  withFile (unJsonOutputFile o) WriteMode $ \hnd -> do
+dumpLOStream objs (JsonOutputFile f) = do
+  progress "logobjects" (Q f)
+  withFile f WriteMode $ \hnd -> do
     forM_ objs $ LBS.hPutStrLn hnd . AE.encode
 
 renderRunScalars :: RunScalars -> [Text]
