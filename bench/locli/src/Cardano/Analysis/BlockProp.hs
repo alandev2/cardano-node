@@ -18,7 +18,7 @@ module Cardano.Analysis.BlockProp
   (blockProp)
 where
 
-import Prelude                  (String, (!!), error, head, id, show, tail)
+import Prelude                  (String, (!!), error, head, last, id, show, tail)
 import Cardano.Prelude          hiding (head, show)
 
 import Control.Arrow            ((***), (&&&))
@@ -43,7 +43,8 @@ import Data.Time.Clock          (NominalDiffTime, UTCTime, addUTCTime, diffUTCTi
 
 import Text.Printf              (printf)
 
-import Ouroboros.Network.Block  (BlockNo(..), SlotNo(..))
+import Cardano.Slotting.Slot    (EpochNo(..), SlotNo(..))
+import Ouroboros.Network.Block  (BlockNo(..))
 
 import Data.Accum
 import Data.Distribution
@@ -66,6 +67,7 @@ data ForgerEvents a
   , bfeBlockNo      :: !BlockNo
   , bfeSlotNo       :: !SlotNo
   , bfeSlotStart    :: !SlotStart
+  , bfeEpochNo      :: !EpochNo
   , bfeBlockSize    :: !(Maybe Int)
   , bfeForged       :: !(Maybe a)
   , bfeAdopted      :: !(Maybe a)
@@ -259,7 +261,10 @@ doBlockProp p cFilters eventMaps = do
   putStrLn ("tip block: "    <> show tipBlock :: String)
   putStrLn ("chain length: " <> show (length chain) :: String)
   pure BlockPropagation
-    { bpForgerForges        = forgerEventsCDF   (Just . bfForged    . beForge)
+    { bpSlotRange           = (,)
+                              (head chainV & beSlotNo)
+                              (last chainV & beSlotNo)
+    , bpForgerForges        = forgerEventsCDF   (Just . bfForged    . beForge)
     , bpForgerAdoptions     = forgerEventsCDF   ((\x ->
                                                     if bfChainDelta x == 1
                                                     then Just (bfAdopted x)
@@ -349,6 +354,7 @@ doBlockProp p cFilters eventMaps = do
      , beBlockPrev  = bfeBlockPrev
      , beBlockNo    = bfeBlockNo
      , beSlotNo     = bfeSlotNo
+     , beEpochNo    = bfeEpochNo
      , beForge =
        BlockForge
        { bfForger     = host
@@ -424,7 +430,7 @@ blockEventMapsFromLogObjects ci (f@(unJsonLogfile -> fp), xs) =
    machBlockMap = foldl (blockPropMachEventsStep ci f) mempty xs
 
 blockPropMachEventsStep :: ChainInfo -> JsonLogfile -> MachBlockMap UTCTime -> LogObject -> MachBlockMap UTCTime
-blockPropMachEventsStep ci (JsonLogfile fp) bMap lo = case lo of
+blockPropMachEventsStep ci@CInfo{..} (JsonLogfile fp) bMap lo = case lo of
   -- 0. Notice (observer only)
   LogObject{loAt, loHost, loBody=LOChainSyncClientSeenHeader{loBlock,loBlockNo,loSlotNo}} ->
     let mbe0 = Map.lookup loBlock bMap
@@ -471,6 +477,8 @@ blockPropMachEventsStep ci (JsonLogfile fp) bMap lo = case lo of
         , bfeBlockNo      = loBlockNo
         , bfeSlotNo       = loSlotNo
         , bfeSlotStart    = slotStart ci loSlotNo
+        , bfeEpochNo      = EpochNo $
+                            fst (unSlotNo loSlotNo `divMod` epoch_length gsis)
         , bfeBlockSize    = Nothing
         , bfeForged       = Just loAt
         , bfeAdopted      = Nothing

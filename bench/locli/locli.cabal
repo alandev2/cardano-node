@@ -45,6 +45,7 @@ library
                      , bytestring
                      , cardano-config
                      , cardano-prelude
+                     , cardano-slotting
                      , containers
                      , deepseq
                      , directory
