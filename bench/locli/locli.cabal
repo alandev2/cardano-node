@@ -22,6 +22,7 @@ library
 
                        Cardano.Analysis.API
                        Cardano.Analysis.BlockProp
+                       Cardano.Analysis.ChainFilter
                        Cardano.Analysis.Driver
                        Cardano.Analysis.MachTimeline
 

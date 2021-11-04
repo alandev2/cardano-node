@@ -1,4 +1,3 @@
-{-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving#-}
@@ -15,7 +14,7 @@ import           Prelude (String)
 import           Cardano.Prelude
 
 import Data.Aeson.Types qualified as Aeson
-import Data.Aeson (FromJSON(..), ToJSON, Object, withObject, (.:))
+import Data.Aeson (FromJSON(..), Object, withObject, (.:))
 import Data.Attoparsec.Text qualified as Atto
 import Data.Attoparsec.Time qualified as Iso8601
 import Data.Text (intercalate, pack)
@@ -26,7 +25,6 @@ import Options.Applicative
 import Options.Applicative qualified as Opt
 
 import Ouroboros.Network.Block (SlotNo(..))
-
 
 data GenesisProfile
   = GenesisProfile
@@ -64,16 +62,6 @@ data Profile
   , date             :: UTCTime
   }
   deriving (Show)
-
--- | Block classification -- primary for validity as subjects of analysis.
-data BlockCond
-  = BCUnitaryChainDelta
-    -- ^ All timings account for processing of a single block.
-  | BCBlockFullnessAbove !Double
-    -- ^ Block fullness is above fraction.
-  | BCSinceSlot !SlotNo
-  | BCUntilSlot !SlotNo
-  deriving (FromJSON, Generic, NFData, Show, ToJSON)
 
 renderChainInfoExport :: ChainInfo -> [Text]
 renderChainInfoExport CInfo{..} =

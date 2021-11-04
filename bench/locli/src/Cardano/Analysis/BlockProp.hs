@@ -49,6 +49,7 @@ import Data.Accum
 import Data.Distribution
 
 import Cardano.Analysis.API
+import Cardano.Analysis.ChainFilter
 import Cardano.Analysis.Profile
 import Cardano.Unlog.LogObject  hiding (Text)
 import Cardano.Unlog.Render
@@ -244,17 +245,17 @@ mapChainToPeerBlockObservationCDF percs cbes proj desc =
    blockObservations be =
      proj `mapMaybe` filter isValidBlockObservation (beObservations be)
 
-blockProp :: ChainInfo -> [BlockCond] -> [(JsonLogfile, [LogObject])] -> IO BlockPropagation
-blockProp ci blockConds xs = do
+blockProp :: ChainInfo -> [ChainFilter] -> [(JsonLogfile, [LogObject])] -> IO BlockPropagation
+blockProp ci cFilters xs = do
   putStrLn ("blockProp: recovering block event maps" :: String)
-  doBlockProp (cProfile ci) blockConds =<< mapConcurrently
+  doBlockProp (cProfile ci) cFilters =<< mapConcurrently
     (\x ->
         evaluate $ DS.force $
         blockEventMapsFromLogObjects ci x)
     xs
 
-doBlockProp :: Profile -> [BlockCond] -> [MachBlockMap UTCTime] -> IO BlockPropagation
-doBlockProp p blockConds eventMaps = do
+doBlockProp :: Profile -> [ChainFilter] -> [MachBlockMap UTCTime] -> IO BlockPropagation
+doBlockProp p cFilters eventMaps = do
   putStrLn ("tip block: "    <> show tipBlock :: String)
   putStrLn ("chain length: " <> show (length chain) :: String)
   pure BlockPropagation
@@ -281,7 +282,7 @@ doBlockProp p blockConds eventMaps = do
    chain, chainV :: [BlockEvents]
    chain          = rebuildChain (fmap deltifyEvents <$> eventMaps) tipHash
                     & computeChainBlockGaps
-   chainV         = filter (isValidBlockEvent p blockConds) chain
+   chainV         = filter (isValidBlockEvent p cFilters) chain
 
    forgerEventsCDF   :: (Real a, ToRealFrac a Float) => (BlockEvents -> Maybe a) -> Distribution Float a
    forgerEventsCDF   = mapChainToBlockEventCDF           stdPercentiles chainV

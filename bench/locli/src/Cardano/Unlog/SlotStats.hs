@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE RankNTypes #-}
@@ -7,12 +8,11 @@
 {- HLINT ignore "Use head" -}
 module Cardano.Unlog.SlotStats (module Cardano.Unlog.SlotStats) where
 
-import           Prelude (String, (!!), head)
+import           Prelude ((!!))
 import           Cardano.Prelude hiding (head)
 
 import           Data.Aeson
 import qualified Data.Text as T
-import           Data.List (dropWhileEnd, last)
 import           Data.List.Split (splitOn)
 
 import           Data.Time.Clock (UTCTime, NominalDiffTime)
@@ -54,6 +54,19 @@ data SlotStats
     , slResources    :: !(Resources (Maybe Word64))
     }
   deriving (Generic, Show)
+
+data SlotCond
+  = SSince SlotNo
+  | SUntil SlotNo
+  | SHasLeaders
+  deriving (FromJSON, Generic, NFData, Show, ToJSON)
+
+testSlotStats :: Profile -> SlotStats -> SlotCond -> Bool
+testSlotStats Profile{genesis=GenesisProfile{}}
+              SlotStats{..} = \case
+  SSince s    -> slSlot >= s
+  SUntil s    -> slSlot <= s
+  SHasLeaders -> slCountLeads > 0
 
 instance RenderTimeline SlotStats where
   rtFields _ =
@@ -119,29 +132,6 @@ instance RenderTimeline SlotStats where
      calcProd mut' cpu' = if cpu' == 0 then 1 else mut' / cpu'
 
 instance ToJSON SlotStats
-
--- | Initial and trailing data are noisy outliers: drop that.
---
---   The initial part is useless until the node actually starts
---   to interact with the blockchain, so we drop all slots until
---   they start getting non-zero chain density reported.
---
---   On the trailing part, we drop everything since the last leadership check.
-cleanupSlotStats :: Maybe SlotNo -> Maybe SlotNo -> [SlotStats] -> [SlotStats]
-cleanupSlotStats mStartSlot mEndSlot =
-  -- dropWhile ((== 0) . slDensity) .
-  (\xs -> trace (printf "analysis slot range: [%d, %d]"
-                 (unSlotNo $ slSlot $ head xs)
-                 (unSlotNo $ slSlot $ last xs) :: String)
-    xs) .
-  dropWhile    ((/= 500) . slSlot) .
-  dropWhileEnd ((== 0)   . slCountChecks) .
-  (case mEndSlot of
-     Nothing   -> identity
-     Just slot -> takeWhile ((<= slot) . slSlot)) .
-  (case mStartSlot of
-     Nothing   -> identity
-     Just slot -> dropWhile ((< slot) . slSlot))
 
 zeroSlotStats :: SlotStats
 zeroSlotStats =

@@ -1,3 +1,5 @@
+{-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE RankNTypes #-}
@@ -8,13 +10,11 @@
 {- HLINT ignore "Use head" -}
 module Cardano.Analysis.MachTimeline (module Cardano.Analysis.MachTimeline) where
 
-import           Prelude (String, (!!), error)
-import           Cardano.Prelude
+import           Prelude (String, (!!), error, head, last)
+import           Cardano.Prelude hiding (head)
 
 import           Control.Arrow ((&&&), (***))
-import qualified Data.Aeson as AE
 import           Data.Aeson
-import qualified Data.HashMap.Strict as HashMap
 import           Data.Vector (Vector)
 import qualified Data.Vector as Vec
 import qualified Data.Map.Strict as Map
@@ -36,7 +36,8 @@ import           Cardano.Unlog.SlotStats
 -- | The top-level representation of the machine timeline analysis results.
 data MachTimeline
   = MachTimeline
-    { sMaxChecks         :: !Word64
+    { sSlotRange         :: (SlotNo, SlotNo) -- ^ Analysis range, inclusive.
+    , sMaxChecks         :: !Word64
     , sSlotMisses        :: ![Word64]
     , sSpanLensCPU85     :: ![Int]
     , sSpanLensCPU85EBnd :: ![Int]
@@ -55,7 +56,7 @@ data MachTimeline
     , sSpanLensCPU85RwdDistrib  :: !(Distribution Float Int)
     , sResourceDistribs  :: !(Resources (Distribution Float Word64))
     }
-  deriving Show
+  deriving (Generic, Show, ToJSON)
 
 instance RenderDistributions MachTimeline where
   rdFields _ =
@@ -81,40 +82,6 @@ instance RenderDistributions MachTimeline where
      m = nChunksEachOf  3 6 "Memory usage, MB"
      c = nChunksEachOf  2 6 "CPU85% spans"
 
-instance ToJSON MachTimeline where
-  toJSON MachTimeline{..} = AE.Array $ Vec.fromList
-    [ AE.Object $ HashMap.fromList
-        [ "kind" .= String "spanLensCPU85EBnd"
-        , "xs" .= toJSON sSpanLensCPU85EBnd]
-    , AE.Object $ HashMap.fromList
-        [ "kind" .= String "spanLensCPU85Rwd"
-        , "xs" .= toJSON sSpanLensCPU85Rwd]
-    , AE.Object $ HashMap.fromList
-        [ "kind" .= String "spanLensCPU85"
-        , "xs" .= toJSON sSpanLensCPU85]
-    , AE.Object $ HashMap.fromList
-        [ "kind" .= String "spanLensCPU85Sorted"
-        , "xs" .= toJSON (sort sSpanLensCPU85)]
-    , extendObject "kind" "spancheck" $ toJSON sSpanCheckDistrib
-    , extendObject "kind" "spanlead"  $ toJSON sSpanLeadDistrib
-    , extendObject "kind" "cpu"       $ toJSON (rCentiCpu sResourceDistribs)
-    , extendObject "kind" "gc"        $ toJSON (rCentiGC  sResourceDistribs)
-    , extendObject "kind" "density"   $ toJSON sDensityDistrib
-    , extendObject "kind" "utxo"      $ toJSON sUtxoDistrib
-    , extendObject "kind" "leads"     $ toJSON sLeadsDistrib
-    , extendObject "kind" "misses"    $ toJSON sMissDistrib
-    , extendObject "kind" "blockless" $ toJSON sBlocklessDistrib
-    , extendObject "kind" "rss"       $ toJSON (rRSS      sResourceDistribs)
-    , extendObject "kind" "heap"      $ toJSON (rHeap     sResourceDistribs)
-    , extendObject "kind" "live"      $ toJSON (rLive     sResourceDistribs)
-    , extendObject "kind" "spanLensCPU85Distrib"  $
-                                        toJSON sSpanLensCPU85Distrib
-    , extendObject "kind" "spanLensCPU85EBndDistrib"  $
-                                        toJSON sSpanLensCPU85EBndDistrib
-    , extendObject "kind" "spanLensCPU85RwdDistrib"  $
-                                        toJSON sSpanLensCPU85RwdDistrib
-    ]
-
 slotStatsMachTimeline :: ChainInfo -> [SlotStats] -> MachTimeline
 slotStatsMachTimeline CInfo{} slots =
   MachTimeline
@@ -123,6 +90,8 @@ slotStatsMachTimeline CInfo{} slots =
   , sSpanLensCPU85    = spanLensCPU85
   , sSpanLensCPU85EBnd = sSpanLensCPU85EBnd
   , sSpanLensCPU85Rwd  = sSpanLensCPU85Rwd
+  , sSlotRange        = (,) (slSlot $ head slots)
+                            (slSlot $ last slots)
   --
   , sMissDistrib      = computeDistribution stdPercentiles missRatios
   , sLeadsDistrib     =
