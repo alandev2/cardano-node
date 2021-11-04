@@ -16,7 +16,8 @@ import Data.Text.Short          (toText)
 import Data.Time.Clock          (NominalDiffTime)
 import Text.Printf              (printf)
 
-import Ouroboros.Network.Block  (BlockNo(..), SlotNo(..))
+import Cardano.Slotting.Slot    (EpochNo(..), SlotNo(..))
+import Ouroboros.Network.Block  (BlockNo(..))
 
 import Cardano.Analysis.ChainFilter
 import Cardano.Analysis.Profile
@@ -33,7 +34,8 @@ import Data.Distribution
 -- | Results of block propagation analysis.
 data BlockPropagation
   = BlockPropagation
-    { bpForgerForges        :: !(Distribution Float NominalDiffTime)
+    { bpSlotRange           :: !(SlotNo, SlotNo) -- ^ Analysis range, inclusive.
+    , bpForgerForges        :: !(Distribution Float NominalDiffTime)
     , bpForgerAdoptions     :: !(Distribution Float NominalDiffTime)
     , bpForgerAnnouncements :: !(Distribution Float NominalDiffTime)
     , bpForgerSends         :: !(Distribution Float NominalDiffTime)
@@ -56,6 +58,7 @@ data BlockEvents
   , beBlockPrev    :: !Hash
   , beBlockNo      :: !BlockNo
   , beSlotNo       :: !SlotNo
+  , beEpochNo      :: !EpochNo
   , beForge        :: !BlockForge
   , beObservations :: [BlockObservation]
   , bePropagation  :: !(Distribution Float NominalDiffTime)
@@ -133,11 +136,17 @@ testBlockEvents Profile{genesis=GenesisProfile{..}}
                 BlockEvents{beForge=BlockForge{..},..} = \case
   CBlock flt -> case flt of
     BUnitaryChainDelta -> bfChainDelta == 1
-    BFullnessAbove f ->
-      bfBlockSize >= floor ((fromIntegral max_block_size :: Double) * f)
+    BFullnessGEq f ->
+      bfBlockSize > floor ((fromIntegral max_block_size :: Double) * f)
+    BFullnessLEq f ->
+      bfBlockSize < floor ((fromIntegral max_block_size :: Double) * f)
+    BSizeGEq x -> bfBlockSize >= fromIntegral x
+    BSizeLEq x -> bfBlockSize <= fromIntegral x
   CSlot flt -> case flt of
-    SSince s -> beSlotNo >= s
-    SUntil s -> beSlotNo <= s
+    SlotGEq s -> beSlotNo >= s
+    SlotLEq s -> beSlotNo <= s
+    EpochGEq e -> beEpochNo >= e
+    EpochLEq e -> beEpochNo <= e
     _ -> True
 
 isValidBlockEvent :: Profile -> [ChainFilter] -> BlockEvents -> Bool

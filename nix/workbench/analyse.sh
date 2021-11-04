@@ -20,12 +20,9 @@ analyse() {
 local skip_preparation= time= dump_logobjects= self_args=() locli_args=() since_slot= until_slot= fullness_above=
 while test $# -gt 0
 do case "$1" in
+       --chain-filters )    locli_args+=($1 $2);     self_args+=($1 $2); shift;;
        --reanalyse | --re ) skip_preparation='true'; self_args+=($1);;
        --dump-logobjects )  dump_logobjects='true';  self_args+=($1);;
-       --block-fullness-above )
-                      locli_args+=($1 $2); self_args+=($1 $2); fullness_above=$2; shift;;
-       --since-slot ) locli_args+=($1 $2); self_args+=($1 $2); since_slot=$2; shift;;
-       --until-slot ) locli_args+=($1 $2); self_args+=($1 $2); until_slot=$2; shift;;
        * ) break;; esac; shift; done
 
 local op=${1:-$(usage_analyse)}; shift
@@ -82,19 +79,11 @@ case "$op" in
             --genesis         "$dir"/genesis-shelley.json
             --run-metafile    "$dir"/meta.json
             ## ->
-            --blocks-unitary-chain-delta
-            ## ->
             --timeline-pretty "$adir"/block-propagation.txt
             --analysis-json   "$adir"/block-propagation.json
         )
         if test -n "$dump_logobjects"; then
             locli_args+=(--logobjects-json "$adir"/logs-cluster.logobjects.json); fi
-        if test -n "$fullness_above"; then
-            locli_arge+=(--block-fullness-above $fullness_above); fi
-        if test -n "$since_slot"; then
-            locli_args+=(--since-slot $since_slot); fi
-        if test -n "$until_slot"; then
-            locli_args+=(--until-slot $until_slot); fi
 
         time locli 'analyse' 'block-propagation' \
              "${locli_args[@]}" "$adir"/*.flt.json

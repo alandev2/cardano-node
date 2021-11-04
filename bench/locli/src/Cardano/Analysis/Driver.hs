@@ -88,8 +88,8 @@ runAnalysisCommand (MachineTimelineCmd genesisFile metaFile mChFiltersFile logfi
                         AE.eitherDecode @Genesis <$> LBS.readFile (unJsonGenesisFile genesisFile))
   chFilters <- fmap (fromMaybe []) $
     forM mChFiltersFile $
-      \(JsonSelectorFile f) -> do
-        firstExceptT (RunMetaParseError metaFile . T.pack)
+      \jf@(JsonSelectorFile f) -> do
+        firstExceptT (ChainFiltersParseError jf . T.pack)
                      (newExceptT $
                         AE.eitherDecode @[ChainFilter] <$> LBS.readFile f)
 
@@ -106,8 +106,8 @@ runAnalysisCommand (BlockPropagationCmd genesisFile metaFile mChFiltersFile logf
                         AE.eitherDecode @Genesis <$> LBS.readFile (unJsonGenesisFile genesisFile))
   chFilters <- fmap (fromMaybe []) $
     forM mChFiltersFile $
-      \(JsonSelectorFile f) -> do
-        firstExceptT (RunMetaParseError metaFile . T.pack)
+      \jf@(JsonSelectorFile f) -> do
+        firstExceptT (ChainFiltersParseError jf . T.pack)
                      (newExceptT $
                         AE.eitherDecode @[ChainFilter] <$> LBS.readFile f)
 
@@ -243,6 +243,8 @@ runMachineTimeline chainInfo logfiles chFilters MachineTimelineOutputFiles{..} =
    renderPrettyMachTimeline xs s (TextOutputFile f) =
      withFile f WriteMode $ \hnd -> do
        progress "pretty-timeline" (Q f)
+       hPutStrLn hnd . T.pack $
+         printf "--- input: %s" f
        mapM_ (T.hPutStrLn hnd)
          (renderDistributions p RenderPretty s)
        mapM_ (T.hPutStrLn hnd)

@@ -4,7 +4,8 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# OPTIONS_GHC -Wno-deprecations #-}
+{-# LANGUAGE StandaloneDeriving #-}
+{-# OPTIONS_GHC -Wno-deprecations -Wno-orphans #-}
 {- HLINT ignore "Use head" -}
 module Cardano.Unlog.SlotStats (module Cardano.Unlog.SlotStats) where
 
@@ -18,7 +19,7 @@ import           Data.List.Split (splitOn)
 import           Data.Time.Clock (UTCTime, NominalDiffTime)
 import           Text.Printf
 
-import           Ouroboros.Network.Block (SlotNo(..))
+import           Cardano.Slotting.Slot (EpochNo (..),  SlotNo (..))
 
 import           Data.Accum
 import           Cardano.Analysis.Profile
@@ -56,17 +57,23 @@ data SlotStats
   deriving (Generic, Show)
 
 data SlotCond
-  = SSince SlotNo
-  | SUntil SlotNo
-  | SHasLeaders
+  = SlotGEq        SlotNo
+  | SlotLEq        SlotNo
+  | EpochGEq       EpochNo
+  | EpochLEq       EpochNo
+  | SlotHasLeaders
   deriving (FromJSON, Generic, NFData, Show, ToJSON)
+
+deriving instance NFData EpochNo
 
 testSlotStats :: Profile -> SlotStats -> SlotCond -> Bool
 testSlotStats Profile{genesis=GenesisProfile{}}
               SlotStats{..} = \case
-  SSince s    -> slSlot >= s
-  SUntil s    -> slSlot <= s
-  SHasLeaders -> slCountLeads > 0
+  SlotGEq  s -> slSlot >= s
+  SlotLEq  s -> slSlot <= s
+  EpochGEq s -> fromIntegral slEpoch >= s
+  EpochLEq s -> fromIntegral slEpoch <= s
+  SlotHasLeaders -> slCountLeads > 0
 
 instance RenderTimeline SlotStats where
   rtFields _ =
