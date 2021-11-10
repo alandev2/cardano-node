@@ -45,8 +45,14 @@ withShutdownHandling
   -> IO ()
   -- ^ Action to potentially shutdown via file descriptor
   -> IO ()
-withShutdownHandling Nothing _ action = action
+withShutdownHandling Nothing trace action = do
+  traceWith tracer "withShutdownHandling: NO FD WAS PASSED *************"
+  action
+ where
+   tracer :: Tracer IO Text
+   tracer = trTransformer MaximalVerbosity (severityNotice trace)
 withShutdownHandling (Just fileDescriptor) trace action = do
+  traceWith tracer "withShutdownHandling: WE ARE HERE *************"
   race_ (waitForEOF fileDescriptor) action
  where
    tracer :: Tracer IO Text
@@ -54,8 +60,11 @@ withShutdownHandling (Just fileDescriptor) trace action = do
 
    waitForEOF :: Fd -> IO ()
    waitForEOF (Fd fd) = do
+     traceWith tracer "waitForEOF: Before fdToHandle *************"
      hnd <- IO.fdToHandle fd
+     traceWith tracer "waitForEOF: After fdToHandle *************"
      r <- try $ IO.hGetChar hnd
+     traceWith tracer "waitForEOF: After hGetChar *************"
      case r of
        Left e
          | IO.isEOFError e -> do
