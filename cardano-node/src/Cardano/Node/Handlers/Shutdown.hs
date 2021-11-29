@@ -68,6 +68,10 @@ withShutdownHandling (Just fileDescriptor) trace action = do
      case r of
        Left e
          | IO.isEOFError e -> do
+             IO.hClose hnd
+             closed <- IO.hIsClosed hnd
+             traceWith tracer $ "isEOFError: Is handle closed: "
+             traceWith tracer $ pack (show closed) <>  "*************"
              traceWith tracer "Received shutdown request and shutting node down...throwIO,io-manager-native, wrap hgetchar"
          | otherwise -> do
              traceWith tracer "Received shutdown request but did not encounter EOL in --shutdown-ipc FD"
