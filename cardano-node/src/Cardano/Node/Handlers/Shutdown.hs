@@ -15,7 +15,7 @@ where
 
 import           Prelude
 
-import           Control.Concurrent.Async (race_)
+import           Control.Concurrent.Async (async, race_, wait)
 import           Control.Exception
 import           Control.Monad
 import           Data.Text (Text, pack)
@@ -53,7 +53,7 @@ withShutdownHandling Nothing trace action = do
    tracer = trTransformer MaximalVerbosity (severityNotice trace)
 withShutdownHandling (Just fileDescriptor) trace action = do
   traceWith tracer "withShutdownHandling: WE ARE HERE *************"
-  race_ (waitForEOF fileDescriptor) action
+  race_ (wrapUninterruptableIO $ waitForEOF fileDescriptor) action
  where
    tracer :: Tracer IO Text
    tracer = trTransformer MaximalVerbosity (severityNotice trace)
@@ -68,14 +68,25 @@ withShutdownHandling (Just fileDescriptor) trace action = do
      case r of
        Left e
          | IO.isEOFError e -> do
-             traceWith tracer "Received shutdown request and shutting node down...throwIO"
-             throwIO e
+             traceWith tracer "Received shutdown request and shutting node down...throwIO,io-manager-native, wrap hgetchar"
          | otherwise -> do
              traceWith tracer "Received shutdown request but did not encounter EOL in --shutdown-ipc FD"
              throwIO e
        Right inp  -> do
          traceWith tracer
            $ "Received shutdown request but found unexpected input in --shutdown-ipc FD: " <> pack (show inp)
+
+-- | Windows blocking file IO calls like 'hGetChar' are not interruptable by
+-- asynchronous exceptions, as used by async 'cancel' (as of base-4.12).
+--
+-- This wrapper works around that problem by running the blocking IO in a
+-- separate thread. If the parent thread receives an async cancel then it
+-- will return. Note however that in this circumstance the child thread may
+-- continue and remain blocked, leading to a leak of the thread. As such this
+-- is only reasonable to use a fixed number of times for the whole process.
+--
+wrapUninterruptableIO :: IO a -> IO a
+wrapUninterruptableIO action = async action >>= wait
 
 -- | Spawn a thread that would cause node to shutdown upon ChainDB reaching the
 -- configuration-defined slot.
