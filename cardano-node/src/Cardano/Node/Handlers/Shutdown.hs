@@ -68,7 +68,8 @@ withShutdownHandling (Just fileDescriptor) trace action = do
      case r of
        Left e
          | IO.isEOFError e -> do
-             traceWith tracer "Received shutdown request and shutting node down..."
+             traceWith tracer "Received shutdown request and shutting node down...throwIO"
+             throwIO e
          | otherwise -> do
              traceWith tracer "Received shutdown request but did not encounter EOL in --shutdown-ipc FD"
              throwIO e
