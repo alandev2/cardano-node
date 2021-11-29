@@ -15,6 +15,7 @@ where
 
 import           Prelude
 
+import           Control.Concurrent (threadDelay)
 import           Control.Concurrent.Async (async, race_, wait)
 import           Control.Exception
 import           Control.Monad
@@ -58,6 +59,15 @@ withShutdownHandling (Just fileDescriptor) trace action = do
    tracer :: Tracer IO Text
    tracer = trTransformer MaximalVerbosity (severityNotice trace)
 
+   loop :: IO.Handle -> IO ()
+   loop h = do
+     b <- IO.hIsClosed h
+     if b == True
+     then traceWith tracer "isEOFError: Handle is closed!"
+     else do traceWith tracer $ "isEOFError: Hande still open"
+             threadDelay 1000000
+             loop h
+
    waitForEOF :: Fd -> IO ()
    waitForEOF (Fd fd) = do
      traceWith tracer "waitForEOF: Before fdToHandle *************"
@@ -69,10 +79,8 @@ withShutdownHandling (Just fileDescriptor) trace action = do
        Left e
          | IO.isEOFError e -> do
              IO.hClose hnd
-             closed <- IO.hIsClosed hnd
-             traceWith tracer $ "isEOFError: Is handle closed: "
-             traceWith tracer $ pack (show closed) <>  "*************"
-             traceWith tracer "Received shutdown request and shutting node down...throwIO,io-manager-native, wrap hgetchar"
+             loop hnd
+             traceWith tracer "Received shutdown request and shutting node down...throwIO,io-manager-native, wrap hgetchar, is handle closed"
          | otherwise -> do
              traceWith tracer "Received shutdown request but did not encounter EOL in --shutdown-ipc FD"
              throwIO e
