@@ -76,19 +76,22 @@ case "$op" in
 
         if test ! -f "$dir"/profile.json
         then # Legacy run structure, fix up:
-            msg "fixing up legacy run in:  $dir"
-            jq '.meta.profile_content' "$dir"/meta.json > "$dir"/profile.json
+            if test -z "$(ls -d "$dir"/logs/node-*)"
+            then msg "fixing up a legacy cardano-ops run in:  $dir"
+                 local topdirs=$(ls -d "$dir"/logs-*/ 2>/dev/null || true)
+                 local anadirs=$(ls -d "$dir"/analysis/logs-*/ 2>/dev/null || true)
+                 if test -n "$topdirs"
+                 then for logdir in $topdirs
+                      do local fixed=$(basename "$logdir" | cut -c6-)
+                         mv "$logdir" "$dir"/$fixed; done
+                 elif test -n "$anadirs"
+                 then for logdir in $anadirs
+                      do local fixed=$(basename "$logdir" | cut -c6-)
+                         mv "$logdir" "$dir"/analysis/$fixed; done; fi
+            else msg "fixing up a cardano-ops run in:  $dir"
+            fi
 
-            local topdirs=$(ls -d "$dir"/logs-*/ 2>/dev/null || true)
-            local anadirs=$(ls -d "$dir"/analysis/logs-*/ 2>/dev/null || true)
-            if test -n "$topdirs"
-            then for logdir in $topdirs
-                 do local fixed=$(basename "$logdir" | cut -c6-)
-                    mv "$logdir" "$dir"/$fixed; done
-            elif test -n "$anadirs"
-            then for logdir in $anadirs
-                 do local fixed=$(basename "$logdir" | cut -c6-)
-                    mv "$logdir" "$dir"/analysis/$fixed; done; fi
+            jq '.meta.profile_content' "$dir"/meta.json > "$dir"/profile.json
 
             jq_fmutate "$dir"/env.json '. *
               { type:         "legacy"

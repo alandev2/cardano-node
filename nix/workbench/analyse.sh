@@ -1,18 +1,19 @@
 usage_analyse() {
      usage "analyse" "Analyse cluster runs" <<EOF
+    standard RUN-NAME     Standard batch of analyses: block-propagation, and
+                            machine-timeline
+
     block-propagation RUN-NAME
                           Block propagation analysis for the entire cluster.
 
-    machine-timeline RUN-NAME MACH-NAME
+    machine-timeline RUN-NAME [MACH-NAME=node-1]
                           Produce a general performance timeline for MACH-NAME
 
     Options of 'analyse' command:
 
+       --chain-filters F  Read chain filters to apply from the F JSON file
        --reanalyse        Skip the preparatory steps and launch 'locli' directly
-       --block-fullness-above F
-                          Ignore blocks with fullness below (0 <= F <= 1.0)
-       --since-slot SLOT  Ignore data before given slot
-       --until-slot SLOT  Ignore data past given slot
+       --dump-logobjects  Dump the intermediate data: lifted log objects
 EOF
 }
 
@@ -28,6 +29,10 @@ do case "$1" in
 local op=${1:-$(usage_analyse)}; shift
 
 case "$op" in
+    standard | std )
+        analyse ${self_args[*]}             block-propagation "$@"
+        analyse ${self_args[*]} --reanalyse machine-timeline  "$@"
+        ;;
     block-propagation | bp )
         local usage="USAGE: wb analyse $op [RUN-NAME=current].."
 
