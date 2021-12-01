@@ -99,6 +99,32 @@ case "$op" in
               }
             '
         fi;;
+    fix-systemstart )
+        local usage="USAGE: wb run $op TAG [MACH=node-1]"
+        local tag=${1:?$usage}
+        local mach=${2:-node-1}
+        local dir=$(run compute-path "$tag")
+        local nodelog=$(ls $dir/logs/$mach/node-*.json | head -n1)
+        local genesis=$dir/genesis-shelley.json
+
+        msg "cross-checking systemStart of $tag:  $nodelog"
+        local apparent_systemStart=$(grep -F 'TraceStartLeadershipCheck' $nodelog |
+                                     head -n2 |
+                                     tail -n1 |
+                                     jq '[ (.at | "\(.[:19])Z" | fromdateiso8601)
+                                         , .data.slot
+                                         ] | .[0] - .[1]
+                                           | todateiso8601' -r)
+        local genesis_systemStart=$(jq .systemStart $genesis -r)
+
+        if test "$genesis_systemStart" != "$apparent_systemStart"
+        then msg "systemStart mismatch in $tag:  $apparent_systemStart (log), $genesis_systemStart (genesis) -- fixing genesis to the former"
+             jq_fmutate "$dir"/genesis-shelley.json '. *
+               { systemStart: $systemStart
+               }
+               ' --arg systemStart $apparent_systemStart
+        else msg "systemStart check passed: both at $genesis_systemStart"
+        fi;;
 
     get-path | get )
         local usage="USAGE: wb run $op TAG"
