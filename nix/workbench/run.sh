@@ -279,6 +279,18 @@ case "$op" in
         then jq             'keys | .[]' -r "$dir"/node-specs.json
         else jq '.hostname | keys | .[]' -r "$dir"/meta.json; fi;;
 
+    remote-list | rl )
+        local usage="USAGE: wb run $op ENV DEPL [HOST=DEPL]"
+        local env=${1:?$usage}
+        local depl=${2:?$usage}
+        local host=${3:-$2}
+
+        local nixops_ssh_cmd="cd /var/lib/cardano-node/logs && ls node-*.json"
+        local nixops_cmd="nixops ssh -d $depl $host -- sh -c \"${nixops_ssh_cmd@Q}\""
+        ssh $env -- \
+            sh -c "'cd $depl && nix-shell -p nixops --run \"${nixops_cmd@Q}\"'"
+        ;;
+
     describe )
         local usage="USAGE: wb run $op TAG"
         local tag=${1:?$usage}
