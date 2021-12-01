@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving#-}
@@ -14,7 +15,7 @@ import           Prelude (String)
 import           Cardano.Prelude
 
 import Data.Aeson.Types qualified as Aeson
-import Data.Aeson (FromJSON(..), Object, withObject, (.:))
+import Data.Aeson (FromJSON(..), Object, ToJSON(..), withObject, (.:))
 import Data.Attoparsec.Text qualified as Atto
 import Data.Attoparsec.Time qualified as Iso8601
 import Data.Text (intercalate, pack)
@@ -39,7 +40,7 @@ data GenesisProfile
   , slot_duration        :: NominalDiffTime
   , utxo                 :: Word64
   }
-  deriving (Show, Generic)
+  deriving (Generic, Show, ToJSON)
 
 data GeneratorProfile
   = GeneratorProfile
@@ -49,7 +50,7 @@ data GeneratorProfile
   , tps                      :: Word64
   , tx_count                 :: Word64
   }
-  deriving (Show, Generic)
+  deriving (Generic, Show, ToJSON)
 
 data Profile
   = Profile
@@ -61,7 +62,7 @@ data Profile
   , era              :: Text
   , date             :: UTCTime
   }
-  deriving (Show)
+  deriving (Generic, Show, ToJSON)
 
 renderChainInfoExport :: ChainInfo -> [Text]
 renderChainInfoExport CInfo{..} =
@@ -75,18 +76,19 @@ renderChainInfoExport CInfo{..} =
   ,[ "UTxO",       show $ utxo gsis]
   ]
 
-newtype Genesis
+data Genesis
   = Genesis
-  { systemStart  :: UTCTime
+  { epochLength  :: Word64
+  , systemStart  :: UTCTime
   }
-  deriving (Show, Generic)
+  deriving (Generic, Show, ToJSON)
 
 data ChainInfo
   = ChainInfo
   { cProfile :: Profile
   , cGenesis :: Genesis
   }
-  deriving (Show)
+  deriving (Generic, Show, ToJSON)
 
 pattern CInfo
   :: GenesisProfile
@@ -96,7 +98,7 @@ pattern CInfo
   -> ChainInfo
 pattern CInfo { gsis, gtor, prof, system_start } <-
   ChainInfo prof@(Profile gsis gtor _ _ _ _ _)
-            (Genesis system_start)
+            (Genesis _eplen system_start)
 
 instance FromJSON GenesisProfile
 instance FromJSON GeneratorProfile
@@ -134,12 +136,6 @@ sinceSlot t (SlotStart start) = Time.diffUTCTime t start
 
 afterSlot :: NominalDiffTime -> SlotStart -> UTCTime
 afterSlot t (SlotStart start) = Time.addUTCTime t start
-
--- pChainParams :: Parser ChainParams
--- pChainParams =
---   ChainParams
---     <$> (optUTCTime  "system-start"
---                      "Cluster system start time.")
 
 optUTCTime :: String -> String -> Parser UTCTime
 optUTCTime optname desc =

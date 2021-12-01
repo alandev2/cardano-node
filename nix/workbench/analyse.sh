@@ -9,6 +9,8 @@ usage_analyse() {
     machine-timeline RUN-NAME [MACH-NAME=node-1]
                           Produce a general performance timeline for MACH-NAME
 
+    chaininfo RUN-NAME    Print basic parameters of a run, as seen by locli
+
     Options of 'analyse' command:
 
        --chain-filters F  Read chain filters to apply from the F JSON file
@@ -29,6 +31,17 @@ do case "$1" in
 local op=${1:-$(usage_analyse)}; shift
 
 case "$op" in
+    chaininfo | ci )
+        local name=${1:-current}; shift
+        local dir=$(run get "$name")
+
+        locli_args+=(
+            --genesis         "$dir"/genesis-shelley.json
+            --run-metafile    "$dir"/meta.json
+        )
+
+        time locli 'analyse' 'chaininfo' "${locli_args[@]}"
+        ;;
     standard | std )
         analyse ${self_args[*]}             block-propagation "$@"
         analyse ${self_args[*]} --reanalyse machine-timeline  "$@"

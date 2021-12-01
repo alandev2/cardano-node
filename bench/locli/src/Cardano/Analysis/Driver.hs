@@ -78,6 +78,8 @@ renderAnalysisCmdError cmd err =
 --
 runAnalysisCommand :: AnalysisCommand -> ExceptT AnalysisCmdError IO ()
 runAnalysisCommand (MachineTimelineCmd genesisFile metaFile mChFiltersFile logfiles oFiles) = do
+  progress "genesis" (Q $ unJsonGenesisFile genesisFile)
+  progress "meta"    (Q $ unJsonRunMetafile metaFile)
   chainInfo <-
     ChainInfo
       <$> firstExceptT (RunMetaParseError metaFile . T.pack)
@@ -86,6 +88,8 @@ runAnalysisCommand (MachineTimelineCmd genesisFile metaFile mChFiltersFile logfi
       <*> firstExceptT (GenesisParseError genesisFile . T.pack)
                        (newExceptT $
                         AE.eitherDecode @Genesis <$> LBS.readFile (unJsonGenesisFile genesisFile))
+  liftIO $ LBS.putStrLn (AE.encode chainInfo)
+
   chFilters <- fmap (fromMaybe []) $
     forM mChFiltersFile $
       \jf@(JsonSelectorFile f) -> do
@@ -96,14 +100,18 @@ runAnalysisCommand (MachineTimelineCmd genesisFile metaFile mChFiltersFile logfi
   firstExceptT AnalysisCmdError $
     runMachineTimeline chainInfo logfiles chFilters oFiles
 runAnalysisCommand (BlockPropagationCmd genesisFile metaFile mChFiltersFile logfiles oFiles) = do
+  progress "genesis" (Q $ unJsonGenesisFile genesisFile)
+  progress "meta"    (Q $ unJsonRunMetafile metaFile)
   chainInfo <-
     ChainInfo
       <$> firstExceptT (RunMetaParseError metaFile . T.pack)
                        (newExceptT $
-                         AE.eitherDecode @Profile <$> LBS.readFile (unJsonRunMetafile metaFile))
+                        AE.eitherDecode @Profile <$> LBS.readFile (unJsonRunMetafile metaFile))
       <*> firstExceptT (GenesisParseError genesisFile . T.pack)
                        (newExceptT $
                         AE.eitherDecode @Genesis <$> LBS.readFile (unJsonGenesisFile genesisFile))
+  liftIO $ LBS.putStrLn (AE.encode chainInfo)
+
   chFilters <- fmap (fromMaybe []) $
     forM mChFiltersFile $
       \jf@(JsonSelectorFile f) -> do
@@ -115,6 +123,18 @@ runAnalysisCommand (BlockPropagationCmd genesisFile metaFile mChFiltersFile logf
     runBlockPropagation chainInfo chFilters logfiles oFiles
 runAnalysisCommand SubstringKeysCmd =
   liftIO $ mapM_ putStrLn logObjectStreamInterpreterKeys
+runAnalysisCommand (ChainInfoCmd genesisFile metaFile) = do
+  progress "genesis" (Q $ unJsonGenesisFile genesisFile)
+  progress "meta"    (Q $ unJsonRunMetafile metaFile)
+  chainInfo <-
+    ChainInfo
+      <$> firstExceptT (RunMetaParseError metaFile . T.pack)
+                       (newExceptT $
+                        AE.eitherDecode @Profile <$> LBS.readFile (unJsonRunMetafile metaFile))
+      <*> firstExceptT (GenesisParseError genesisFile . T.pack)
+                       (newExceptT $
+                        AE.eitherDecode @Genesis <$> LBS.readFile (unJsonGenesisFile genesisFile))
+  liftIO $ LBS.putStrLn (AE.encode chainInfo)
 
 runBlockPropagation ::
   ChainInfo -> [ChainFilter] -> [JsonLogfile] -> BlockPropagationOutputFiles -> ExceptT Text IO ()
@@ -157,7 +177,7 @@ data F
   | Q String
   | L [String]
 
-progress :: String -> F -> IO ()
+progress :: MonadIO m => String -> F -> m ()
 progress key = putStrLn . T.pack . \case
   R x  -> printf "{ \"%s\":  %s }"    key x
   Q x  -> printf "{ \"%s\": \"%s\" }" key x
