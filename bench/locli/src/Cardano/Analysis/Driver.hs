@@ -205,6 +205,15 @@ runMachineTimeline chainInfo logfiles chFilters MachineTimelineOutputFiles{..} =
     -- 2. Reprocess the slot stats
     let slotStats = filterSlotStats chFilters noisySlotStats
 
+    let rawSlotFirst = (head    noisySlotStats <&> slSlot) & fromMaybe 0
+        rawSlotLast  = (lastMay noisySlotStats <&> slSlot) & fromMaybe 0
+        anaSlotFirst = (head         slotStats <&> slSlot) & fromMaybe 0
+        anaSlotLast  = (lastMay      slotStats <&> slSlot) & fromMaybe 0
+    liftIO . LBS.putStrLn . AE.encode $
+      DataDomain
+        rawSlotFirst rawSlotLast
+        anaSlotFirst anaSlotLast
+
     -- 3. Derive the timeline
     let drvVectors0, _drvVectors1 :: [DerivedSlot]
         (,) drvVectors0 _drvVectors1 = computeDerivedVectors slotStats

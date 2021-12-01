@@ -128,6 +128,16 @@ data BPErrorKind
   | BPEFork                  !Hash
   deriving (FromJSON, Generic, NFData, Show, ToJSON)
 
+data DataDomain
+  = DataDomain
+    { ddRawSlotFirst      :: SlotNo
+    , ddRawSlotLast       :: SlotNo
+    , ddAnalysisSlotFirst :: SlotNo
+    , ddAnalysisSlotLast  :: SlotNo
+    }
+  deriving (Generic, Show, ToJSON)
+-- Perhaps:  Plutus.V1.Ledger.Slot.SlotRange = Interval Slot
+
 --
 -- * Key properties
 --

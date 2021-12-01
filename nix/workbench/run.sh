@@ -99,6 +99,7 @@ case "$op" in
               }
             '
         fi;;
+
     fix-systemstart )
         local usage="USAGE: wb run $op TAG [MACH=node-1]"
         local tag=${1:?$usage}
@@ -118,12 +119,12 @@ case "$op" in
         local genesis_systemStart=$(jq .systemStart $genesis -r)
 
         if test "$genesis_systemStart" != "$apparent_systemStart"
-        then msg "systemStart mismatch in $tag:  $apparent_systemStart (log), $genesis_systemStart (genesis) -- fixing genesis to the former"
+        then msg "Fixing genesis systemStart in $tag:  $apparent_systemStart (log), $genesis_systemStart (genesis)"
              jq_fmutate "$dir"/genesis-shelley.json '. *
                { systemStart: $systemStart
                }
                ' --arg systemStart $apparent_systemStart
-        else msg "systemStart check passed: both at $genesis_systemStart"
+        else msg "Good: both genesis and log-implied systemStart are at:  $genesis_systemStart"
         fi;;
 
     get-path | get )

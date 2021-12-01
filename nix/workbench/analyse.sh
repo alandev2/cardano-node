@@ -43,8 +43,10 @@ case "$op" in
         time locli 'analyse' 'chaininfo' "${locli_args[@]}"
         ;;
     standard | std )
-        analyse ${self_args[*]}             block-propagation "$@"
-        analyse ${self_args[*]} --reanalyse machine-timeline  "$@"
+        for r in $*
+        do analyse ${self_args[*]}             block-propagation $r
+           analyse ${self_args[*]} --reanalyse machine-timeline  $r
+        done
         ;;
     block-propagation | bp )
         local usage="USAGE: wb analyse $op [RUN-NAME=current].."
@@ -89,8 +91,6 @@ case "$op" in
             wait
             msg "analysis block-propagation:  All done."
         fi
-
-        msg "log sizes:  (files: $(ls "$adir"/*.flt.json 2>/dev/null | wc -l), lines: $(cat "$adir"/*.flt.json | wc -l))"
 
         msg "analysing.."
         locli_args+=(
