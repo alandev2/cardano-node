@@ -58,7 +58,6 @@ data Profile
   , generator        :: GeneratorProfile
   , tag              :: Text
   , profile_name     :: Text
-  , genesis_cache_id :: Text
   , era              :: Text
   , date             :: UTCTime
   }
@@ -97,7 +96,7 @@ pattern CInfo
   -> UTCTime
   -> ChainInfo
 pattern CInfo { gsis, gtor, prof, system_start } <-
-  ChainInfo prof@(Profile gsis gtor _ _ _ _ _)
+  ChainInfo prof@(Profile gsis gtor _ _ _ _)
             (Genesis _eplen system_start)
 
 instance FromJSON GenesisProfile
@@ -113,7 +112,6 @@ instance FromJSON Profile where
       <*> profile_content .: "generator"
       <*> meta .: "tag"
       <*> meta .: "profile"
-      <*> meta .: "genesis_cache_id"
       <*> gener .: "era"
       <*> ((meta .: "timestamp" :: Aeson.Parser Integer)
            <&> Time.posixSecondsToUTCTime . realToFrac)

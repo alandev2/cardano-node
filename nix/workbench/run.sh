@@ -160,6 +160,69 @@ case "$op" in
     current-run-profile | current-profile | profile | p )
         jq '.' "$(run current-path)"/profile.json;;
 
+    allocate-from-machine-run-slice | alloc-from-mrs )
+        local usage="USAGE: wb run $op MACH RUN-SLICE-ID PRESET"
+        local mach=${1:?$usage}; shift
+        local run_slice_id=${1:?$usage}; shift
+        local preset=${1:?$usage}; shift
+
+        local args=(
+            --arg id     $run_slice_id
+            --arg mach   $mach
+            --arg preset $preset
+        )
+        local meta=$(jq '
+            { Y:  $id[0:4], M:   $id[4:6], D: $id[6:8]   }     as $d
+          | { h: $id[8:10], m: $id[10:12], s: $id[12:14] }     as $t
+          | { tag:     "\($d.Y)-\($d.M)-\($d.D)-\($t.h).\($t.m).\($mach)"
+            , profile: $preset
+            , date:    "\($d.Y)-\($d.M)-\($d.D)T\($t.h):\($t.m):\($t.s)Z"
+            , batch:   $mach
+            }
+            | . +
+              { timestamp: (.date | fromdateiso8601)
+              }
+          | { meta: . }
+          ' "${args[@]}" --null-input)
+        local tag=$(jq '.meta.tag' -r <<<$meta)
+        local dir="$global_rundir"/$tag
+
+        mkdir -p "$dir"/$mach
+        local genesis=$(profile preset-get-file "$preset" 'genesis' 'genesis/genesis-shelley.json')
+        cp -f  "$genesis" "$dir"/genesis-shelley.json
+        ln -sf genesis-shelley.json "$dir"/genesis.json
+        jq <<<$meta '
+              $gsisf[0] as $gsis
+            | . *
+            { meta:
+              { profile_content:
+                { genesis:
+                  { active_slots_coeff: $gsis.activeSlotsCoeff
+                  , delegators:         1000000
+                  , dense_pool_density: 1
+                  , epoch_length:       $gsis.epochLength
+                  , parameter_k:        $gsis.securityParam
+                  , max_block_size:     $gsis.protocolParams.maxBlockBodySize
+                  , max_tx_size:        $gsis.protocolParams.maxTxSize
+                  , n_pools:            1
+                  , slot_duration:      $gsis.slotLength
+                  , utxo:               4000000
+                  }
+                , generator:
+                  { add_tx_size:        0
+                  , inputs_per_tx:      1
+                  , outputs_per_tx:     1
+                  , tps:                8
+                  , tx_count:           0
+                  , era:                "alonzo"
+                  }
+                }
+              }
+            }
+           ' --slurpfile gsisf "$dir"/genesis-shelley.json > "$dir"/meta.json
+
+        echo $dir;;
+
     allocate )
         local usage="USAGE: wb run $op BATCH-NAME PROFILE-NAME [ENV-CONFIG-OPTS..] [-- BACKEND-ARGS-AND-ENV-CONFIG-OPTS..]"
         local batch=${1:?$usage}; shift
@@ -279,16 +342,34 @@ case "$op" in
         then jq             'keys | .[]' -r "$dir"/node-specs.json
         else jq '.hostname | keys | .[]' -r "$dir"/meta.json; fi;;
 
-    remote-list | rl )
+    remote-machine-run-slice-list | rmrsl )
         local usage="USAGE: wb run $op ENV DEPL [HOST=DEPL]"
         local env=${1:?$usage}
         local depl=${2:?$usage}
         local host=${3:-$2}
 
-        local nixops_ssh_cmd="cd /var/lib/cardano-node/logs && ls node-*.json"
-        local nixops_cmd="nixops ssh -d $depl $host -- sh -c \"${nixops_ssh_cmd@Q}\""
+        local nixops_ssh_cmd="ls /var/lib/cardano-node/logs/node-*.json"
+        local nixops_cmd="nixops ssh -d $depl $host -- $nixops_ssh_cmd"
         ssh $env -- \
-            sh -c "'cd $depl && nix-shell -p nixops --run \"${nixops_cmd@Q}\"'"
+            sh -c "cd $depl && nix-shell -p nixops --run ${nixops_cmd@Q}" |
+            sed 's_/var/lib/cardano-node/logs/node-\(.*\).json_\1_'
+        ;;
+
+    remote-machine-run-slice-fetch | rmrsf )
+        local usage="USAGE: wb run $op ENV DEPL MACHINE SLICE"
+        local env=${1:?$usage}
+        local depl=${2:?$usage}
+        local mach=${3:?$usage}
+        local slice=${4:?$usage}
+
+        local dir=$(run allocate-from-machine-run-slice \
+                        $mach $slice 'mainnet')
+        local nixops_cmd="nixops scp -d $depl --from $mach /var/lib/cardano-node/logs/node-$slice.json $depl/node-$slice.json"
+        ssh $env -- \
+            sh -c "cd $depl && nix-shell -p nixops --run ${nixops_cmd@Q}"
+        ssh $env -- \
+            sh -c "cd $depl && tar c $depl/node-$slice.json --zstd" |
+            (cd $dir; tar x --zstd)
         ;;
 
     describe )
