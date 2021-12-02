@@ -39,6 +39,7 @@ import           Ouroboros.Consensus.Protocol.TPraos (TPraosCanBeLeader (..))
 import           Ouroboros.Consensus.Shelley.Eras (StandardShelley)
 import           Ouroboros.Consensus.Shelley.Node (Nonce (..), ProtocolParamsShelley (..),
                    ProtocolParamsShelleyBased (..), TPraosLeaderCredentials (..))
+import           Ouroboros.Consensus.Protocol.TPraos (TPraosCanBeLeader (..))
 
 import           Cardano.Ledger.BaseTypes (ProtVer (..))
 import qualified Cardano.Ledger.Shelley.Genesis as Shelley

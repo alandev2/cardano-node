@@ -1,4 +1,4 @@
-index-state: 2021-12-07T00:00:00Z
+index-state: 2021-09-15T00:00:00Z
 
 packages:
     cardano-api
@@ -88,9 +88,6 @@ package trace-forward
 package byron-spec-ledger
   tests: False
 
-package compact-map
-  ghc-options: -Werror
-
 package iohk-monitoring
   tests: False
 
@@ -173,8 +170,8 @@ source-repository-package
 source-repository-package
   type: git
   location: https://github.com/input-output-hk/cardano-ledger
-  tag: 1a9ec4ae9e0b09d54e49b2a40c4ead37edadcce5
-  --sha256: 0avzyiqq0m8njd41ck9kpn992yq676b1az9xs77977h7cf85y4wm
+  tag: 2b079053e0d16d3ac004934cc9897c8081d10088
+  --sha256: 0xdrgam3kx7mvq1bj7xr51fgzkmnb6q73yq2cnp9zr72v4dmhjl5
   subdir:
     eras/alonzo/impl
     eras/alonzo/test-suite
@@ -191,9 +188,7 @@ source-repository-package
     libs/cardano-ledger-core
     libs/cardano-ledger-pretty
     libs/cardano-protocol-tpraos
-    libs/cardano-data
     libs/compact-map
-    libs/set-algebra
     libs/small-steps
     libs/small-steps-test
     libs/non-integral
@@ -237,8 +232,8 @@ source-repository-package
 source-repository-package
   type: git
   location: https://github.com/input-output-hk/ouroboros-network
-  tag: 67b7c9e7a684e97ad5a5ed7fe85e2b900e8bba11
-  --sha256: 1cjwqpwfdl61pg847pc5h2sm2k1rac7i1f1rv89snmnbzy8s42hj
+  tag: 2ee01d4dd72afc310382296449b26fb9e1e37863
+  --sha256: 0g8hvhyl1k4fr65q3g60yk62qx1pywnlcbs8idgjarkf1j4agq7h
   subdir:
     io-sim
     io-classes
@@ -246,8 +241,8 @@ source-repository-package
     network-mux
     ouroboros-consensus
     ouroboros-consensus-byron
-    ouroboros-consensus-cardano
     ouroboros-consensus-protocol
+    ouroboros-consensus-cardano
     ouroboros-consensus-shelley
     ouroboros-network
     ouroboros-network-framework

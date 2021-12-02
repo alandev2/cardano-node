@@ -53,6 +53,7 @@ import Ouroboros.Consensus.Protocol.Ledger.HotKey qualified as HotKey
 import Ouroboros.Consensus.Shelley.Ledger.Block (ShelleyBlock)
 import Ouroboros.Consensus.Shelley.Ledger.Mempool (TxId (..))
 import Ouroboros.Consensus.Shelley.Node ()
+import Ouroboros.Consensus.Protocol.Ledger.HotKey qualified as HotKey
 import Ouroboros.Consensus.TypeFamilyWrappers
 
 

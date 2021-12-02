@@ -100,6 +100,7 @@ import           Ouroboros.Network.NodeToNode (NodeToNodeVersion, RemoteAddress)
 
 import qualified Ouroboros.Consensus.Storage.ChainDB as ChainDB
 import qualified Ouroboros.Consensus.Storage.LedgerDB.OnDisk as LedgerDB
+import qualified Ouroboros.Consensus.Storage.LedgerDB.Types as LedgerDB
 
 import           Cardano.Tracing.Config
 import           Cardano.Tracing.Constraints (TraceConstraints)
@@ -183,7 +184,7 @@ indexGCType :: ChainDB.TraceGCEvent a -> Int
 indexGCType ChainDB.ScheduledGC{} = 1
 indexGCType ChainDB.PerformedGC{} = 2
 
-indexReplType :: ChainDB.TraceLedgerReplayEvent a -> Int
+indexReplType :: ChainDB.TraceReplayEvent a -> Int
 indexReplType LedgerDB.ReplayFromGenesis{} = 1
 indexReplType LedgerDB.ReplayFromSnapshot{} = 2
 indexReplType LedgerDB.ReplayedBlock{} = 3
@@ -213,6 +214,20 @@ instance ElidingTracer (WithSeverity (ChainDB.TraceEvent blk)) where
                (WithSeverity _s2 (ChainDB.TraceCopyToImmutableDBEvent _)) = True
   isEquivalent (WithSeverity _s1 (ChainDB.TraceCopyToImmutableDBEvent _))
                (WithSeverity _s2 (ChainDB.TraceCopyToImmutableDBEvent _)) = True
+  isEquivalent (WithSeverity _s1 (ChainDB.TraceInitChainSelEvent ev1))
+               (WithSeverity _s2 (ChainDB.TraceInitChainSelEvent ev2)) =
+    case (ev1, ev2) of
+      (ChainDB.InitChainSelValidation (
+        ChainDB.UpdateLedgerDbTraceEvent (
+            LedgerDB.StartedPushingBlockToTheLedgerDb
+              (LedgerDB.Pushing _)
+              (LedgerDB.PushGoal _))),
+       ChainDB.InitChainSelValidation (
+        ChainDB.UpdateLedgerDbTraceEvent (
+            LedgerDB.StartedPushingBlockToTheLedgerDb
+              (LedgerDB.Pushing _)
+              (LedgerDB.PushGoal _)))) -> True
+      _ -> False
   isEquivalent _ _ = False
   -- the types to be elided
   doelide (WithSeverity _ (ChainDB.TraceLedgerReplayEvent _)) = True
@@ -229,6 +244,7 @@ instance ElidingTracer (WithSeverity (ChainDB.TraceEvent blk)) where
   doelide (WithSeverity _ (ChainDB.TraceAddBlockEvent (ChainDB.AddedToCurrentChain events _ _  _))) = null events
   doelide (WithSeverity _ (ChainDB.TraceAddBlockEvent _)) = True
   doelide (WithSeverity _ (ChainDB.TraceCopyToImmutableDBEvent _)) = True
+  doelide (WithSeverity _ (ChainDB.TraceInitChainSelEvent (ChainDB.InitChainSelValidation (ChainDB.UpdateLedgerDbTraceEvent{})))) = True
   doelide _ = False
   conteliding _tverb _tr _ (Nothing, _count) = return (Nothing, 0)
   conteliding tverb tr ev@(WithSeverity _ (ChainDB.TraceAddBlockEvent ChainDB.AddedToCurrentChain{})) (_old, oldt) = do
@@ -245,16 +261,23 @@ instance ElidingTracer (WithSeverity (ChainDB.TraceEvent blk)) where
       return (Just ev, count)
   conteliding _tverb _tr ev@(WithSeverity _ (ChainDB.TraceGCEvent _)) (_old, count) =
       return (Just ev, count)
-  conteliding _tverb tr ev@(WithSeverity _ (ChainDB.TraceLedgerReplayEvent (LedgerDB.ReplayedBlock pt [] replayTo))) (_old, count) = do
-      let slotno = toInteger $ unSlotNo (realPointSlot pt)
-          endslot = toInteger $ withOrigin 0 unSlotNo (pointSlot replayTo)
-          startslot = if count == 0 then slotno else toInteger count
-          progress :: Double = (fromInteger slotno * 100.0) / fromInteger (max slotno endslot)
-      when (count > 0 && (slotno - startslot) `mod` 1000 == 0) $ do  -- report every 1000th slot
-          meta <- mkLOMeta (getSeverityAnnotation ev) (getPrivacyAnnotation ev)
-          traceNamedObject tr (meta, LogValue "block replay progress (%)" (PureD (fromInteger (round (progress * 10.0)) / 10.0)))
-      return (Just ev, fromInteger startslot)
+  conteliding _tverb _tr ev@(WithSeverity _ (ChainDB.TraceLedgerReplayEvent (LedgerDB.ReplayedBlock {}))) (_old, count) = do
+      return (Just ev, count)
+  conteliding _tverb _tr ev@(WithSeverity _ (ChainDB.TraceInitChainSelEvent
+                                             (ChainDB.InitChainSelValidation
+                                              (ChainDB.UpdateLedgerDbTraceEvent
+                                               (LedgerDB.StartedPushingBlockToTheLedgerDb
+                                                (LedgerDB.Pushing curr) _))))) (_old, count) = return $
+    let currSlot = fromIntegral $ unSlotNo $ realPointSlot curr in
+      if count == 0
+      then (Just ev, currSlot)
+      else if count + 10000 < currSlot
+           then (Nothing, 0)
+           else (Just ev, count)
   conteliding _ _ _ _ = return (Nothing, 0)
+
+  reportelided _tverb _tr (WithSeverity _ (ChainDB.TraceLedgerReplayEvent (LedgerDB.ReplayedBlock{}))) _count = pure ()
+  reportelided t tr ev count = defaultelidedreporting  t tr ev count
 
 instance (StandardHash header, Eq peer) => ElidingTracer
   (WithSeverity [TraceLabelPeer peer (FetchDecision [Point header])]) where
