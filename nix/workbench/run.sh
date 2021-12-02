@@ -63,42 +63,46 @@ case "$op" in
     compute-path )
         echo -n "$global_rundir/$1";;
 
+    fix-legacy-run-structure | fix-legacy )
+        local usage="USAGE: wb run $op TAG"
+        local tag=${1:?$usage}
+        local dir=$(run compute-path "$tag")
+
+        if test -z "$(ls -d "$dir"/node-* 2>/dev/null)"
+        then msg "fixing up a legacy cardano-ops run in:  $dir"
+             if   local dirs=$(ls -d "$dir"/logs/logs-*/ 2>/dev/null || true)
+                  test -n "$dirs"
+             then for logdir in $dirs
+                  do local logs_less=$(basename "$logdir" | cut -c6-)
+                     mv "$logdir" "$dir"/$logs_less; done
+             elif local dirs=$(ls -d "$dir"/analysis/logs-*/ 2>/dev/null || true)
+                  test -n "$dirs"
+             then for logdir in $dirs
+                  do local logs_less=$(basename "$logdir" | cut -c6-)
+                     mv "$logdir" "$dir"/$logs_less; done; fi
+        else msg "fixing up a cardano-ops run in:  $dir"; fi
+
+        jq '.meta.profile_content' "$dir"/meta.json > "$dir"/profile.json
+
+        jq_fmutate "$dir"/env.json '. *
+          { type:         "legacy"
+          , staggerPorts: false
+          }
+        ';;
+
     check )
         local usage="USAGE: wb run $op TAG"
         local tag=${1:?$usage}
         local dir=$(run compute-path "$tag")
 
-        if test "$(tr -d / <<<$tag)" != "$tag"
-        then fatal "run tag has slashes:  $tag"; fi
+        test "$(tr -d / <<<$tag)" = "$tag" ||
+            fatal "run tag has slashes:  $tag"
 
         jq_check_json "$dir"/meta.json ||
             fatal "run $tag (at $dir) missing a file:  meta.json"
 
-        if test ! -f "$dir"/profile.json
-        then # Legacy run structure, fix up:
-            if test -z "$(ls -d "$dir"/logs/node-*)"
-            then msg "fixing up a legacy cardano-ops run in:  $dir"
-                 local topdirs=$(ls -d "$dir"/logs-*/ 2>/dev/null || true)
-                 local anadirs=$(ls -d "$dir"/analysis/logs-*/ 2>/dev/null || true)
-                 if test -n "$topdirs"
-                 then for logdir in $topdirs
-                      do local fixed=$(basename "$logdir" | cut -c6-)
-                         mv "$logdir" "$dir"/$fixed; done
-                 elif test -n "$anadirs"
-                 then for logdir in $anadirs
-                      do local fixed=$(basename "$logdir" | cut -c6-)
-                         mv "$logdir" "$dir"/analysis/$fixed; done; fi
-            else msg "fixing up a cardano-ops run in:  $dir"
-            fi
-
-            jq '.meta.profile_content' "$dir"/meta.json > "$dir"/profile.json
-
-            jq_fmutate "$dir"/env.json '. *
-              { type:         "legacy"
-              , staggerPorts: false
-              }
-            '
-        fi;;
+        test -f "$dir"/profile.json ||
+            run fix-legacy-run-structure "$tag";;
 
     fix-systemstart )
         local usage="USAGE: wb run $op TAG [MACH=node-1]"

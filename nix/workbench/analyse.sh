@@ -20,12 +20,13 @@ EOF
 }
 
 analyse() {
-local skip_preparation= time= dump_logobjects= self_args=() locli_args=() since_slot= until_slot= fullness_above=
+local time= dump_logobjects= self_args=() locli_args=() prefilter='true' prefilter_jq='false'
 while test $# -gt 0
 do case "$1" in
-       --chain-filters )    locli_args+=($1 $2);     self_args+=($1 $2); shift;;
-       --reanalyse | --re ) skip_preparation='true'; self_args+=($1);;
+       --reanalyse | --re ) prefilter='false';       self_args+=($1);;
+       --prefilter-jq )     prefilter_jq='true';     self_args+=($1);;
        --dump-logobjects )  dump_logobjects='true';  self_args+=($1);;
+       --chain-filters )    locli_args+=($1 $2);     self_args+=($1 $2); shift;;
        * ) break;; esac; shift; done
 
 local op=${1:-$(usage_analyse)}; shift
@@ -53,21 +54,24 @@ case "$op" in
 
         local name=${1:-current}; shift
         local dir=$(run get "$name")
+        test -n "$dir" || fail "malformed run: $name"
+
+        echo "{ \"run\": \"$(jq .meta.tag "$dir"/meta.json --raw-output)\" }"
+
         local adir=$dir/analysis
-        if test -z "$dir"
-        then fail "malformed run: $name"; fi
+        mkdir -p "$adir"
 
         ## 0. subset what we care about into the keyfile
-        local keyfile=$adir/substring-keys
+        local keyfile="$adir"/substring-keys
         locli analyse substring-keys > "$keyfile"
 
         ## 1. enumerate logs, filter by keyfile & consolidate
         local logdirs=($(ls -d "$dir"/node-*/ 2>/dev/null) $(ls -d "$dir"/analysis/node-*/ 2>/dev/null))
         # "$dir"/node-*/ "$dir"/analysis/node-*/
 
-        if test -z "$skip_preparation" -o -z "$(ls "$adir"/logs-node-*.flt.json 2>/dev/null)"
+        echo "{ \"prefilter\": $prefilter, \"prefilter_jq\": $prefilter_jq }"
+        if test "$prefilter" = 'true' -o -z "$(ls "$adir"/logs-node-*.flt.json 2>/dev/null)"
         then
-            echo "{ \"prefiltering\": true }"
             local jq_args=(
                 --sort-keys
                 --compact-output
@@ -82,14 +86,15 @@ case "$op" in
                then msg "no logs in $d, skipping.."; fi
                local output="$adir"/logs-$(basename "$d").flt.json
                grep -hFf "$keyfile" $logfiles |
-               jq "${jq_args[@]}" --arg dirHostname "$(basename "$d")" \
-                 > "$output" &
+                   if test "$prefilter_jq" = 'true'
+                   then jq "${jq_args[@]}" --arg dirHostname "$(basename "$d")"
+                   else cat
+                   fi > "$output" &
             done
             wait
         fi
 
-        mkdir -p "$adir"
-        echo "{ \"run\": \"$(jq .meta.tag "$dir"/meta.json --raw-output)\" }"
+        echo "{ \"dataSetSizeMB\": $(echo $(($(cat "$adir"/*.flt.json | wc -c) / 1000 / 1000))) }"
         locli_args+=(
             --genesis         "$dir"/genesis-shelley.json
             --run-metafile    "$dir"/meta.json
@@ -144,9 +149,11 @@ case "$op" in
         local name=${1:-current}
         local mach=${2:-node-1}
         local dir=$(run get "$name")
-        local adir=$dir/analysis
+        test -n "$dir" || fail "malformed run: $name"
 
-        msg "analysing run $(jq .meta.tag "$dir"/meta.json --raw-output)"
+        echo "{ \"run\": \"$(jq .meta.tag "$dir"/meta.json --raw-output)\" }"
+
+        local adir=$dir/analysis
         mkdir -p "$adir"
 
         ## 0. subset what we care about into the keyfile
@@ -163,10 +170,11 @@ case "$op" in
            ## 1. enumerate logs, filter by keyfile & consolidate
            local logs=($(ls "$dir"/$mach/stdout* 2>/dev/null | tac) $(ls "$dir"/$mach/node-*.json 2>/dev/null) $(ls "$dir"/analysis/$mach/node-*.json 2>/dev/null)) consolidated="$adir"/logs-$mach.json
 
-           if test -z "${logs[*]}"
-           then msg "no logs for $mach in run $name"; continue; fi
+           test -n "${logs[*]}" ||
+               fail "no logs for $mach in run $name"
 
-           if test -z "$skip_preparation" -o -z "$(ls "$adir"/logs-$mach.json 2>/dev/null)"
+           echo "{ \"prefilter\": $prefilter }"
+           if test "$prefilter" = 'true' -o -z "$(ls "$adir"/logs-$mach.json 2>/dev/null)"
            then grep -hFf "$keyfile" "${logs[@]}"  > "$consolidated"; fi
 
            locli_args+=(
