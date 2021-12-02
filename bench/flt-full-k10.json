@@ -7,7 +7,7 @@
 , { "tag": "CSlot"
   , "contents":
     { "tag": "SlotLEq"
-    , "contents": 56000
+    , "contents": 37000
     }
   }
 , { "tag": "CBlock"
