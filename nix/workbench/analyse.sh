@@ -57,12 +57,9 @@ case "$op" in
         if test -z "$dir"
         then fail "malformed run: $name"; fi
 
-        msg "analysing run $(jq .meta.tag "$dir"/meta.json --raw-output)"
-        mkdir -p "$adir"
-
         ## 0. subset what we care about into the keyfile
         local keyfile=$adir/substring-keys
-        locli analyse substring-keys | grep -v 'Temporary modify' > "$keyfile"
+        locli analyse substring-keys > "$keyfile"
 
         ## 1. enumerate logs, filter by keyfile & consolidate
         local logdirs=($(ls -d "$dir"/node-*/ 2>/dev/null) $(ls -d "$dir"/analysis/node-*/ 2>/dev/null))
@@ -70,7 +67,7 @@ case "$op" in
 
         if test -z "$skip_preparation" -o -z "$(ls "$adir"/logs-node-*.flt.json 2>/dev/null)"
         then
-            msg "filtering logs in: $dir/node-* "
+            echo "{ \"prefiltering\": true }"
             local jq_args=(
                 --sort-keys
                 --compact-output
@@ -89,10 +86,10 @@ case "$op" in
                  > "$output" &
             done
             wait
-            msg "analysis block-propagation:  All done."
         fi
 
-        msg "analysing.."
+        mkdir -p "$adir"
+        echo "{ \"run\": \"$(jq .meta.tag "$dir"/meta.json --raw-output)\" }"
         locli_args+=(
             --genesis         "$dir"/genesis-shelley.json
             --run-metafile    "$dir"/meta.json
@@ -107,7 +104,8 @@ case "$op" in
              "${locli_args[@]}" "$adir"/*.flt.json
 
         ## More than one run passed?
-        test $# -gt 0 && analyse ${self_args[*]} block-propagation "$@";;
+        if test $# -gt 0
+        then analyse ${self_args[*]} block-propagation "$@"; fi;;
 
     grep-filtered-logs | grep | g )
         local usage="USAGE: wb analyse $op BLOCK [MACHSPEC=*] [RUN-NAME=current]"
@@ -171,7 +169,6 @@ case "$op" in
            if test -z "$skip_preparation" -o -z "$(ls "$adir"/logs-$mach.json 2>/dev/null)"
            then grep -hFf "$keyfile" "${logs[@]}"  > "$consolidated"; fi
 
-           msg "analysing logs of:  $mach  (lines: $(wc -l "$consolidated"))"
            locli_args+=(
                --genesis         "$dir"/genesis-shelley.json
                --run-metafile    "$dir"/meta.json
@@ -192,9 +189,7 @@ case "$op" in
                 "${locli_args[@]}" "$consolidated"
            ) &
         done
-
-        wait
-        msg "analysis machine-timeline:  All done.";;
+        wait;;
 
     * ) usage_analyse;; esac
 }
