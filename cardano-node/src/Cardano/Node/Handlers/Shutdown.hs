@@ -16,7 +16,7 @@ where
 import           Prelude
 
 import           Control.Concurrent (threadDelay)
-import           Control.Concurrent.Async (async, race_, wait)
+import           Control.Concurrent.Async (race_)
 import           Control.Exception
 import           Control.Monad
 import           Data.Text (Text, pack)
@@ -54,7 +54,7 @@ withShutdownHandling Nothing trace action = do
    tracer = trTransformer MaximalVerbosity (severityNotice trace)
 withShutdownHandling (Just fileDescriptor) trace action = do
   traceWith tracer "withShutdownHandling: WE ARE HERE *************"
-  race_ (wrapUninterruptableIO $ waitForEOF fileDescriptor) action
+  race_ (waitForEOF fileDescriptor) action
  where
    tracer :: Tracer IO Text
    tracer = trTransformer MaximalVerbosity (severityNotice trace)
@@ -62,9 +62,9 @@ withShutdownHandling (Just fileDescriptor) trace action = do
    loop :: IO.Handle -> IO ()
    loop h = do
      b <- IO.hIsClosed h
-     if b == True
+     if b
      then traceWith tracer "isEOFError: Handle is closed!"
-     else do traceWith tracer $ "isEOFError: Hande still open"
+     else do traceWith tracer "isEOFError: Hande still open"
              threadDelay 1000000
              loop h
 
@@ -97,8 +97,8 @@ withShutdownHandling (Just fileDescriptor) trace action = do
 -- continue and remain blocked, leading to a leak of the thread. As such this
 -- is only reasonable to use a fixed number of times for the whole process.
 --
-wrapUninterruptableIO :: IO a -> IO a
-wrapUninterruptableIO action = async action >>= wait
+--wrapUninterruptableIO :: IO a -> IO a
+--wrapUninterruptableIO action = async action >>= wait
 
 -- | Spawn a thread that would cause node to shutdown upon ChainDB reaching the
 -- configuration-defined slot.
