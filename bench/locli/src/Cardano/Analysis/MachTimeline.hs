@@ -1,3 +1,4 @@
+{-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE ImportQualifiedPost #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE NamedFieldPuns #-}
@@ -143,6 +144,12 @@ data TimelineAccum
   , aTxsCollectedAt:: Map.Map TId UTCTime
   }
 
+mapTAHead :: (SlotStats -> SlotStats) -> TimelineAccum -> TimelineAccum
+mapTAHead f xs@TimelineAccum{aSlotStats=s:ss} = xs {aSlotStats=f s:ss}
+
+forTAHead :: TimelineAccum -> (SlotStats -> SlotStats) -> TimelineAccum
+forTAHead = flip mapTAHead
+
 data RunScalars
   = RunScalars
   { rsElapsed       :: Maybe NominalDiffTime
@@ -198,93 +205,91 @@ timelineFromLogObjects ci =
 
 timelineStep :: ChainInfo -> TimelineAccum -> LogObject -> TimelineAccum
 timelineStep ci a@TimelineAccum{aSlotStats=cur:rSLs, ..} = \case
-  lo@LogObject{loAt, loBody=LOTraceStartLeadershipCheck slot _ _} ->
-    if slSlot cur > slot
-    -- Slot log entry for a slot we've supposedly done processing.
+  LogObject{loAt, loBody=LOTraceStartLeadershipCheck slot utxo density} ->
+    if      slot == slSlot cur     -- L-shipCheck for the current slot.
+    then forTAHead a (onLeadershipCheck loAt)
+    else if slot - slSlot cur == 1 -- L-shipCheck for the next slot.
+    then addTimelineSlot ci slot loAt 1 utxo density a
+    else if slot < slSlot cur      -- L-shipCheck for a slot we've gone by already.
     then a { aSlotStats = cur
-             { slOrderViol = slOrderViol cur + 1
-             } : case (slSlot cur - slot, rSLs) of
-                   -- Limited back-patching:
-                   (1, p1:rest)       ->       onLeadershipCheck loAt p1:rest
-                   (2, p1:p2:rest)    ->    p1:onLeadershipCheck loAt p2:rest
-                   (3, p1:p2:p3:rest) -> p1:p2:onLeadershipCheck loAt p3:rest
-                   _ -> rSLs -- Give up.
+             { slOrderViol = slOrderViol cur + 1 }
+             : -- Limited back-patching:
+             case (slSlot cur - slot, rSLs) of
+               (1, p1:rest)       ->       onLeadershipCheck loAt p1:rest
+               (2, p1:p2:rest)    ->    p1:onLeadershipCheck loAt p2:rest
+               (x, _) ->
+                 error $ "timelineStep:  backpatching at depth " <> show x
            }
-    else if slSlot cur == slot
-    then a { aSlotStats = onLeadershipCheck loAt cur : rSLs
-           }
-    else if slot - slSlot cur > 1
-    then let gap = unSlotNo $ slot - slSlot cur - 1
+         -- L-shipCheck for a further-than-immediate future slot
+    else let gap = unSlotNo $ slot - slSlot cur - 1
              gapStartSlot = slSlot cur + 1 in
-         updateOnNewSlot lo $ -- We have a slot check gap to patch:
-         patchSlotCheckGap gap gapStartSlot a
-    else updateOnNewSlot lo a
+         addTimelineSlot ci slot loAt 1 utxo density $
+           -- We have a slot check gap to patch:
+           patchSlotCheckGap gap gapStartSlot a
+   where
+     patchSlotCheckGap :: Word64 -> SlotNo -> TimelineAccum -> TimelineAccum
+     patchSlotCheckGap gap slot a'@TimelineAccum{aSlotStats=cur':_} =
+       case gap of
+         0 -> a'
+         n -> patchSlotCheckGap (n - 1) (slot + 1) $
+               addTimelineSlot ci slot
+                 (unSlotStart $ slotStart ci slot)
+                 0 (slUtxoSize cur') (slDensity cur') a'
   LogObject{loAt, loBody=LOTraceNodeIsLeader _} ->
-    a { aSlotStats = onLeadershipCertainty loAt True cur : rSLs
-      }
+    forTAHead a (onLeadershipCertainty loAt True)
   LogObject{loAt, loBody=LOTraceNodeNotLeader _} ->
-    a { aSlotStats = onLeadershipCertainty loAt False cur : rSLs
-      }
+    forTAHead a (onLeadershipCertainty loAt False)
   LogObject{loAt, loBody=LOResources rs} ->
     -- Update resource stats accumulators & record values current slot.
-    a { aResAccums = accs
-      , aResTimestamp = loAt
-      , aSlotStats = cur { slResources = Just <$> extractResAccums accs
-                     } : rSLs
-      }
+    (forTAHead a
+      \s-> s { slResources = Just <$> extractResAccums accs })
+    { aResAccums = accs, aResTimestamp = loAt }
    where accs = updateResAccums loAt rs aResAccums
   LogObject{loBody=LOMempoolTxs txCount} ->
-    a { aMempoolTxs     = txCount
-      , aSlotStats      = cur { slMempoolTxs = txCount
-                          } : rSLs
-      }
+    (forTAHead a
+      \s-> s { slMempoolTxs = txCount })
+    { aMempoolTxs     = txCount }
   LogObject{loBody=LOBlockContext blockNo} ->
-    let newBlock = aBlockNo /= blockNo in
-    a { aBlockNo        = blockNo
-      , aLastBlockSlot  = if newBlock
-                          then slSlot cur
-                          else aLastBlockSlot
-      , aSlotStats      = cur { slBlockNo = blockNo
-                              , slBlockless = if newBlock
-                                              then 0
-                                              else slBlockless cur
-                              } : rSLs
-      }
+    (forTAHead a
+      \s-> s { slBlockNo = blockNo
+             , slBlockless = if newBlock then 0 else slBlockless cur
+             })
+    { aBlockNo        = blockNo
+    , aLastBlockSlot  = if newBlock
+                        then slSlot cur
+                        else aLastBlockSlot
+    }
+   where
+     newBlock = aBlockNo /= blockNo
   LogObject{loBody=LOLedgerTookSnapshot} ->
-    a { aSlotStats      = cur { slChainDBSnap = slChainDBSnap cur + 1
-                              } : rSLs
-      }
+    forTAHead a
+      \s-> s { slChainDBSnap = slChainDBSnap cur + 1 }
   LogObject{loBody=LOMempoolRejectedTx} ->
-    a { aSlotStats      = cur { slRejectedTx = slRejectedTx cur + 1
-                              } : rSLs
-      }
+    forTAHead a
+      \s-> s { slRejectedTx = slRejectedTx cur + 1 }
   LogObject{loBody=LOGeneratorSummary _noFails sent elapsed threadwiseTps} ->
-    a { aRunScalars       =
-        aRunScalars
+    a { aRunScalars = aRunScalars
         { rsThreadwiseTps = Just threadwiseTps
         , rsElapsed       = Just elapsed
         , rsSubmitted     = Just sent
         }
       }
   LogObject{loBody=LOTxsCollected coll, loTid, loAt} ->
-    a { aTxsCollectedAt =
-        aTxsCollectedAt &
-        (\case
-            Just{} -> Just loAt
-            --   error $ mconcat
-            --   ["Duplicate LOTxsCollected for tid ", show tid, " at ", show loAt]
-            Nothing -> Just loAt)
-        `Map.alter` loTid
-      , aSlotStats      =
-        cur
-        { slTxsCollected = slTxsCollected cur + max 0 (fromIntegral coll)
-        } : rSLs
-      }
+    (forTAHead a
+      \s-> s { slTxsCollected = slTxsCollected cur + max 0 (fromIntegral coll) })
+    { aTxsCollectedAt =
+      aTxsCollectedAt &
+      (\case
+          Just{} -> Just loAt
+          --   error $ mconcat
+          --   ["Duplicate LOTxsCollected for tid ", show tid, " at ", show loAt]
+          Nothing -> Just loAt)
+      `Map.alter` loTid
+    }
   LogObject{loBody=LOTxsProcessed acc rej, loTid, loAt} ->
-    a { aTxsCollectedAt = loTid `Map.delete` aTxsCollectedAt
-      , aSlotStats      =
-        cur
-        { slTxsMemSpan =
+    (forTAHead a
+      \s@SlotStats{..}-> s
+      { slTxsMemSpan =
           case loTid `Map.lookup` aTxsCollectedAt of
             Nothing ->
               -- error $ mconcat
@@ -292,24 +297,19 @@ timelineStep ci a@TimelineAccum{aSlotStats=cur:rSLs, ..} = \case
               Just $
               1.0
               +
-              fromMaybe 0 (slTxsMemSpan cur)
+              fromMaybe 0 slTxsMemSpan
             Just base ->
               Just $
               (loAt `Time.diffUTCTime` base)
               +
-              fromMaybe 0 (slTxsMemSpan cur)
-        , slTxsAccepted = slTxsAccepted cur + acc
-        , slTxsRejected = slTxsRejected cur + max 0 (fromIntegral rej)
-        } : rSLs
-      }
+              fromMaybe 0 slTxsMemSpan
+      , slTxsAccepted = slTxsAccepted + acc
+      , slTxsRejected = slTxsRejected + max 0 (fromIntegral rej)
+      })
+    { aTxsCollectedAt = loTid `Map.delete` aTxsCollectedAt
+    }
   _ -> a
  where
-   updateOnNewSlot :: LogObject -> TimelineAccum -> TimelineAccum
-   updateOnNewSlot LogObject{loAt, loBody=LOTraceStartLeadershipCheck slot utxo density} a' =
-     extendTimelineAccum ci slot loAt 1 utxo density a'
-   updateOnNewSlot _ _ =
-     error "Internal invariant violated: updateSlot called for a non-LOTraceStartLeadershipCheck LogObject."
-
    onLeadershipCheck :: UTCTime -> SlotStats -> SlotStats
    onLeadershipCheck now sl@SlotStats{..} =
      sl { slCountChecks = slCountChecks + 1
@@ -321,21 +321,13 @@ timelineStep ci a@TimelineAccum{aSlotStats=cur:rSLs, ..} = \case
      sl { slCountLeads = slCountLeads + if lead then 1 else 0
         , slSpanLead  = max 0 $ now `Time.diffUTCTime` (slSpanCheck `Time.addUTCTime` unSlotStart slStart)
         }
-
-   patchSlotCheckGap :: Word64 -> SlotNo -> TimelineAccum -> TimelineAccum
-   patchSlotCheckGap 0 _ a' = a'
-   patchSlotCheckGap n slot a'@TimelineAccum{aSlotStats=cur':_} =
-     patchSlotCheckGap (n - 1) (slot + 1) $
-     extendTimelineAccum ci slot (unSlotStart $ slotStart ci slot) 0 (slUtxoSize cur') (slDensity cur') a'
-   patchSlotCheckGap _ _ _ =
-     error "Internal invariant violated: patchSlotCheckGap called with empty TimelineAccum chain."
 timelineStep _ a = const a
 
-extendTimelineAccum ::
+addTimelineSlot ::
      ChainInfo
   -> SlotNo -> UTCTime -> Word64 -> Word64 -> Float
   -> TimelineAccum -> TimelineAccum
-extendTimelineAccum ci@CInfo{..} slot time checks utxo density a@TimelineAccum{..} =
+addTimelineSlot ci@CInfo{..} slot time checks utxo density a@TimelineAccum{..} =
   let (epoch, epochSlot) = unSlotNo slot `divMod` epoch_length gsis in
     a { aSlotStats = SlotStats
         { slSlot        = slot
