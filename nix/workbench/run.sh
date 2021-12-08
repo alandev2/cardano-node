@@ -54,11 +54,11 @@ local op=${1:-list}; test $# -gt 0 && shift
 
 case "$op" in
     list | ls )
-        test -d "$global_rundir" && cd "$global_rundir" &&
-            ls | {
-                ## Filter out aliases:
-                grep -v 'current\|env\.json' || true; }
-        ;;
+        test -d "$global_rundir" &&
+            (cd "$global_rundir"
+             find . -mindepth 1 -maxdepth 1 -type d |
+                 cut -c3- |
+                 grep -v 'current$' || true);;
 
     compute-path )
         echo -n "$global_rundir/$1";;
@@ -67,6 +67,11 @@ case "$op" in
         local usage="USAGE: wb run $op TAG"
         local tag=${1:?$usage}
         local dir=$(run compute-path "$tag")
+
+        if test ! -f "$dir"/genesis-shelley.json
+        then msg "fixing up genesis naming in:  $dir"
+             mv "$dir"/genesis.json "$dir"/genesis-shelley.json
+             ln -s genesis-shelley.json "$dir"/genesis.json; fi
 
         if test -z "$(ls -d "$dir"/node-* 2>/dev/null)"
         then msg "fixing up a legacy cardano-ops run in:  $dir"
@@ -101,7 +106,7 @@ case "$op" in
         jq_check_json "$dir"/meta.json ||
             fatal "run $tag (at $dir) missing a file:  meta.json"
 
-        test -f "$dir"/profile.json ||
+        test -f "$dir"/profile.json -a -f "$dir"/genesis-shelley.json ||
             run fix-legacy-run-structure "$tag";;
 
     fix-systemstart )
