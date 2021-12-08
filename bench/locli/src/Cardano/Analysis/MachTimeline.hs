@@ -1,5 +1,4 @@
-{-# LANGUAGE DeriveAnyClass #-}
-{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE ImportQualifiedPost #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE RankNTypes #-}
@@ -10,53 +9,27 @@
 {- HLINT ignore "Use head" -}
 module Cardano.Analysis.MachTimeline (module Cardano.Analysis.MachTimeline) where
 
-import           Prelude (String, (!!), error, head, last)
-import           Cardano.Prelude hiding (head)
+import Prelude (String, (!!), error, head, last)
+import Cardano.Prelude hiding (head)
 
-import           Control.Arrow ((&&&), (***))
-import           Data.Aeson
-import           Data.Vector (Vector)
-import qualified Data.Vector as Vec
-import qualified Data.Map.Strict as Map
+import Control.Arrow ((&&&), (***))
+import Data.Vector (Vector)
+import Data.Vector qualified as Vec
+import Data.Map.Strict qualified as Map
 
-import           Data.Time.Clock (NominalDiffTime, UTCTime)
-import qualified Data.Time.Clock as Time
+import Data.Time.Clock (NominalDiffTime, UTCTime)
+import Data.Time.Clock qualified as Time
 
-import           Ouroboros.Network.Block (SlotNo(..))
+import Ouroboros.Network.Block (SlotNo(..))
 
-import           Data.Accum
-import           Data.Distribution
+import Data.Accum
+import Data.Distribution
 
-import           Cardano.Analysis.Profile
-import           Cardano.Unlog.LogObject hiding (Text)
-import           Cardano.Unlog.Render
-import           Cardano.Unlog.Resources
-import           Cardano.Unlog.SlotStats
-
--- | The top-level representation of the machine timeline analysis results.
-data MachTimeline
-  = MachTimeline
-    { sSlotRange         :: (SlotNo, SlotNo) -- ^ Analysis range, inclusive.
-    , sMaxChecks         :: !Word64
-    , sSlotMisses        :: ![Word64]
-    , sSpanLensCPU85     :: ![Int]
-    , sSpanLensCPU85EBnd :: ![Int]
-    , sSpanLensCPU85Rwd  :: ![Int]
-    -- distributions
-    , sMissDistrib       :: !(Distribution Float Float)
-    , sLeadsDistrib      :: !(Distribution Float Word64)
-    , sUtxoDistrib       :: !(Distribution Float Word64)
-    , sDensityDistrib    :: !(Distribution Float Float)
-    , sSpanCheckDistrib  :: !(Distribution Float NominalDiffTime)
-    , sSpanLeadDistrib   :: !(Distribution Float NominalDiffTime)
-    , sBlocklessDistrib  :: !(Distribution Float Word64)
-    , sSpanLensCPU85Distrib
-                         :: !(Distribution Float Int)
-    , sSpanLensCPU85EBndDistrib :: !(Distribution Float Int)
-    , sSpanLensCPU85RwdDistrib  :: !(Distribution Float Int)
-    , sResourceDistribs  :: !(Resources (Distribution Float Word64))
-    }
-  deriving (Generic, Show, ToJSON)
+import Cardano.Analysis.API
+import Cardano.Analysis.Profile
+import Cardano.Unlog.LogObject hiding (Text)
+import Cardano.Unlog.Render
+import Cardano.Unlog.Resources
 
 instance RenderDistributions MachTimeline where
   rdFields _ =
@@ -194,6 +167,32 @@ timelineFromLogObjects ci =
      }
    zeroRunScalars :: RunScalars
    zeroRunScalars = RunScalars Nothing Nothing Nothing
+   zeroSlotStats :: SlotStats
+   zeroSlotStats =
+     SlotStats
+     { slSlot = 0
+     , slEpoch = 0
+     , slEpochSlot = 0
+     , slStart = SlotStart zeroUTCTime
+     , slCountChecks = 0
+     , slCountLeads = 0
+     , slOrderViol = 0
+     , slEarliest = zeroUTCTime
+     , slSpanCheck = realToFrac (0 :: Int)
+     , slSpanLead = realToFrac (0 :: Int)
+     , slMempoolTxs = 0
+     , slTxsMemSpan = Nothing
+     , slTxsCollected = 0
+     , slTxsAccepted = 0
+     , slTxsRejected = 0
+     , slUtxoSize = 0
+     , slDensity = 0
+     , slResources = pure Nothing
+     , slChainDBSnap = 0
+     , slRejectedTx = 0
+     , slBlockNo = 0
+     , slBlockless = 0
+     }
 
 timelineStep :: ChainInfo -> TimelineAccum -> LogObject -> TimelineAccum
 timelineStep ci a@TimelineAccum{aSlotStats=cur:rSLs, ..} = \case

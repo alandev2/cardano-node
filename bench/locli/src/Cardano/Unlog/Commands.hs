@@ -1,19 +1,20 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE ImportQualifiedPost #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 -- | CLI command types
 module Cardano.Unlog.Commands (module Cardano.Unlog.Commands) where
 
-import           Prelude
+import Prelude
 
-import           Data.Text (Text)
+import Data.Text (Text)
 
-import           Options.Applicative
-import qualified Options.Applicative as Opt
+import Options.Applicative
+import Options.Applicative qualified as Opt
 
-import           Ouroboros.Network.Block (SlotNo(..))
+import Ouroboros.Network.Block (SlotNo(..))
 
-import           Cardano.Unlog.LogObject hiding (Text)
+import Cardano.Unlog.LogObject hiding (Text)
 
 --
 -- Analysis CLI command data types

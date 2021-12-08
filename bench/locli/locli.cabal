@@ -32,7 +32,6 @@ library
                        Cardano.Unlog.Render
                        Cardano.Unlog.Resources
                        Cardano.Unlog.Run
-                       Cardano.Unlog.SlotStats
 
   other-modules:       Paths_locli
 
@@ -45,6 +44,7 @@ library
                      , bytestring
                      , cardano-config
                      , cardano-prelude
+                     , iohk-monitoring
                      , cardano-slotting
                      , containers
                      , deepseq
@@ -53,7 +53,6 @@ library
                      , file-embed
                      , gnuplot
                      , Histogram
-                     , iohk-monitoring
                      , optparse-applicative-fork
                      , optparse-generic
                      , ouroboros-network
@@ -66,6 +65,7 @@ library
                      , text
                      , text-short
                      , time
+                     , trace-resources
                      , transformers
                      , transformers-except
                      , unordered-containers

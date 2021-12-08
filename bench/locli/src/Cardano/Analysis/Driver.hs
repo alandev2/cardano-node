@@ -39,7 +39,6 @@ import Cardano.Analysis.Profile
 import Cardano.Unlog.Commands
 import Cardano.Unlog.LogObject          hiding (Text)
 import Cardano.Unlog.Render
-import Cardano.Unlog.SlotStats
 
 
 data AnalysisCmdError

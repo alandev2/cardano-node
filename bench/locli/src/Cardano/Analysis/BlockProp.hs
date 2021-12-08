@@ -55,7 +55,6 @@ import Cardano.Analysis.Profile
 import Cardano.Unlog.LogObject  hiding (Text)
 import Cardano.Unlog.Render
 import Cardano.Unlog.Resources
-import Cardano.Unlog.SlotStats
 
 
 -- | Block's events, as seen by its forger.

@@ -2,36 +2,36 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingVia #-}
 {-# LANGUAGE GeneralisedNewtypeDeriving #-}
+{-# LANGUAGE ImportQualifiedPost #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# OPTIONS_GHC -Wno-partial-fields -Wno-orphans #-}
 
 module Cardano.Unlog.LogObject (module Cardano.Unlog.LogObject) where
 
-import           Prelude (String, error, id)
-import qualified Prelude
-import           Cardano.Prelude hiding (Text)
+import Prelude (String, error, head, id, show)
+import Cardano.Prelude hiding (Text, head, show)
 
-import           Control.Monad (fail)
-import           Data.Aeson (FromJSON(..), ToJSON(..), Value(..), Object, (.:))
-import           Data.Aeson.Types (Parser)
-import qualified Data.Aeson as AE
-import qualified Data.Aeson.Types as AE
-import qualified Data.ByteString.Lazy as LBS
-import qualified Data.HashMap.Strict as HM
-import qualified Data.Text as LText
-import qualified Data.Text.Short as Text
-import           Data.Text.Short (ShortText, fromText, toText)
-import           Data.Time.Clock (NominalDiffTime, UTCTime)
-import qualified Data.Map as Map
-import           Data.Vector (Vector)
-import           Quiet (Quiet (..))
+import Control.Monad (fail)
+import Data.Aeson (FromJSON(..), ToJSON(..), Value(..), Object, (.:))
+import Data.Aeson.Types (Parser)
+import Data.Aeson qualified as AE
+import Data.Aeson.Types qualified as AE
+import Data.ByteString.Lazy qualified as LBS
+import Data.HashMap.Strict qualified as HM
+import Data.Text qualified as LText
+import Data.Text.Short qualified as Text
+import Data.Text.Short (ShortText, fromText, toText)
+import Data.Time.Clock (NominalDiffTime, UTCTime)
+import Data.Map qualified as Map
+import Data.Vector (Vector)
+import Quiet (Quiet (..))
 
-import           Ouroboros.Network.Block (BlockNo(..), SlotNo(..))
+import Ouroboros.Network.Block (BlockNo(..), SlotNo(..))
 
-import           Cardano.BM.Stats.Resources
+import Cardano.Logging.Resources.Types
 
-import           Data.Accum (zeroUTCTime)
+import Data.Accum (zeroUTCTime)
 
 
 type Text = ShortText

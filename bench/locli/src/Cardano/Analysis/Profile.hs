@@ -11,8 +11,8 @@
 {-# OPTIONS_GHC -Wno-incomplete-patterns -Wno-name-shadowing #-}
 module Cardano.Analysis.Profile (module Cardano.Analysis.Profile) where
 
-import           Prelude (String)
-import           Cardano.Prelude
+import Prelude (String)
+import Cardano.Prelude
 
 import Data.Aeson.Types qualified as Aeson
 import Data.Aeson (FromJSON(..), Object, ToJSON(..), withObject, (.:))

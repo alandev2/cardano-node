@@ -11,19 +11,21 @@ import Prelude                  ((!!), error)
 import Cardano.Prelude          hiding (head)
 
 import Data.Aeson               (ToJSON(..), FromJSON(..))
+import Data.List.Split          (splitOn)
 import Data.Text   qualified as T
 import Data.Text.Short          (toText)
 import Data.Time.Clock          (NominalDiffTime)
-import Text.Printf              (printf)
+import Data.Time                (UTCTime)
+import Text.Printf              (PrintfArg, printf)
 
 import Cardano.Slotting.Slot    (EpochNo(..), SlotNo(..))
 import Ouroboros.Network.Block  (BlockNo(..))
 
 import Cardano.Analysis.ChainFilter
 import Cardano.Analysis.Profile
+import Cardano.Logging.Resources.Types
 import Cardano.Unlog.LogObject  hiding (Text)
 import Cardano.Unlog.Render
-import Cardano.Unlog.SlotStats
 
 import Data.Distribution
 
@@ -130,13 +132,65 @@ data BPErrorKind
 
 data DataDomain
   = DataDomain
-    { ddRawSlotFirst      :: SlotNo
-    , ddRawSlotLast       :: SlotNo
-    , ddAnalysisSlotFirst :: SlotNo
-    , ddAnalysisSlotLast  :: SlotNo
+    { ddRawSlotFirst      :: !SlotNo
+    , ddRawSlotLast       :: !SlotNo
+    , ddAnalysisSlotFirst :: !SlotNo
+    , ddAnalysisSlotLast  :: !SlotNo
     }
   deriving (Generic, Show, ToJSON)
 -- Perhaps:  Plutus.V1.Ledger.Slot.SlotRange = Interval Slot
+
+-- | The top-level representation of the machine timeline analysis results.
+data MachTimeline
+  = MachTimeline
+    { sSlotRange         :: (SlotNo, SlotNo) -- ^ Analysis range, inclusive.
+    , sMaxChecks         :: !Word64
+    , sSlotMisses        :: ![Word64]
+    , sSpanLensCPU85     :: ![Int]
+    , sSpanLensCPU85EBnd :: ![Int]
+    , sSpanLensCPU85Rwd  :: ![Int]
+    -- distributions
+    , sMissDistrib       :: !(Distribution Float Float)
+    , sLeadsDistrib      :: !(Distribution Float Word64)
+    , sUtxoDistrib       :: !(Distribution Float Word64)
+    , sDensityDistrib    :: !(Distribution Float Float)
+    , sSpanCheckDistrib  :: !(Distribution Float NominalDiffTime)
+    , sSpanLeadDistrib   :: !(Distribution Float NominalDiffTime)
+    , sBlocklessDistrib  :: !(Distribution Float Word64)
+    , sSpanLensCPU85Distrib
+                         :: !(Distribution Float Int)
+    , sSpanLensCPU85EBndDistrib :: !(Distribution Float Int)
+    , sSpanLensCPU85RwdDistrib  :: !(Distribution Float Int)
+    , sResourceDistribs  :: !(Resources (Distribution Float Word64))
+    }
+  deriving (Generic, Show, ToJSON)
+
+data SlotStats
+  = SlotStats
+    { slSlot         :: !SlotNo
+    , slEpoch        :: !Word64
+    , slEpochSlot    :: !Word64
+    , slStart        :: !SlotStart
+    , slCountChecks  :: !Word64
+    , slCountLeads   :: !Word64
+    , slChainDBSnap  :: !Word64
+    , slRejectedTx   :: !Word64
+    , slBlockNo      :: !Word64
+    , slBlockless    :: !Word64
+    , slOrderViol    :: !Word64
+    , slEarliest     :: !UTCTime
+    , slSpanCheck    :: !NominalDiffTime
+    , slSpanLead     :: !NominalDiffTime
+    , slMempoolTxs   :: !Word64
+    , slTxsMemSpan   :: !(Maybe NominalDiffTime)
+    , slTxsCollected :: !Word64
+    , slTxsAccepted  :: !Word64
+    , slTxsRejected  :: !Word64
+    , slUtxoSize     :: !Word64
+    , slDensity      :: !Float
+    , slResources    :: !(Resources (Maybe Word64))
+    }
+  deriving (Generic, Show, ToJSON)
 
 --
 -- * Key properties
@@ -171,8 +225,17 @@ isValidBlockObservation BlockObservation{..} =
   -- 2. All timings account for processing of a single block
   boChainDelta == 1
 
+testSlotStats :: Profile -> SlotStats -> SlotCond -> Bool
+testSlotStats Profile{genesis=GenesisProfile{}}
+              SlotStats{..} = \case
+  SlotGEq  s -> slSlot >= s
+  SlotLEq  s -> slSlot <= s
+  EpochGEq s -> fromIntegral slEpoch >= s
+  EpochLEq s -> fromIntegral slEpoch <= s
+  SlotHasLeaders -> slCountLeads > 0
+
 --
--- * Instances
+-- * Timeline rendering instances
 --
 instance RenderDistributions BlockPropagation where
   rdFields _ =
@@ -271,3 +334,66 @@ instance RenderTimeline BlockEvents where
      bpeIsNegative _ _ = False
 
   rtCommentary BlockEvents{..} = ("    " <>) . show <$> beErrors
+
+instance RenderTimeline SlotStats where
+  rtFields _ =
+    --  Width LeftPad
+    [ Field 5 0 "abs.slot"     "abs."  "slot#"   $ IWord64 (unSlotNo . slSlot)
+    , Field 4 0 "slot"         "  epo" "slot"    $ IWord64 slEpochSlot
+    , Field 2 0 "epoch"        "ch "   "#"       $ IWord64 slEpoch
+    , Field 5 0 "block"        "block" "no."     $ IWord64 slBlockNo
+    , Field 5 0 "blockGap"     "block" "gap"     $ IWord64 slBlockless
+    , Field 3 0 "leadChecks"   "lead"  "chk"     $ IWord64 slCountChecks
+    , Field 3 0 "leadShips"    "ship"  "win"     $ IWord64 slCountLeads
+    , Field 4 0 "CDBSnap"      "CDB"   "snap"    $ IWord64 slChainDBSnap
+    , Field 3 0 "rejTxs"       "rej"   "txs"     $ IWord64 slRejectedTx
+    , Field 7 0 "checkSpan"    "check" "span"    $ IDeltaT slSpanCheck
+    , Field 5 0 "leadSpan"     "lead"  "span"    $ IDeltaT slSpanLead
+    , Field 4 0 "mempoolTxSpan" (t 4!!0) "span"  $ IText (maybe "" show.slTxsMemSpan)
+    , Field 4 0 "txsColl"     (t 4!!1) "cold"    $ IWord64 slTxsCollected
+    , Field 4 0 "txsAcc"      (t 4!!2) "accd"    $ IWord64 slTxsAccepted
+    , Field 4 0 "txsRej"      (t 4!!3) "rejd"    $ IWord64 slTxsRejected
+    , Field 5 1 "chDensity"    "chain" "dens."   $ IFloat  slDensity
+    , Field 3 0 "CPU%"        (c 3!!0) "all"     $ IText (d 3.rCentiCpu.slResources)
+    , Field 3 0 "GC%"         (c 3!!1) "GC"      $ IText (d 3.fmap (min 999).rCentiGC.slResources)
+    , Field 3 0 "MUT%"        (c 3!!2) "mut"     $ IText (d 3.fmap (min 999).rCentiMut.slResources)
+    , Field 3 0 "majFlt"      (g 3!!0) "maj"     $ IText (d 3.rGcsMajor.slResources)
+    , Field 3 0 "minFlt"      (g 3!!1) "min"     $ IText (d 3.rGcsMinor.slResources)
+    , Field 6 0 "productiv"   "Produc" "tivity"  $ IText
+      (\SlotStats{..}->
+          f 4 $ calcProd <$> (min 6 . -- workaround for ghc-8.10.2
+                              fromIntegral <$> rCentiMut slResources :: Maybe Float)
+          <*> (fromIntegral <$> rCentiCpu slResources))
+    , Field 5 0 "rssMB"       (m 5!!0) "RSS"     $ IText (d 5.rRSS  .slResources)
+    , Field 5 0 "heapMB"      (m 5!!1) "Heap"    $ IText (d 5.rHeap .slResources)
+    , Field 5 0 "liveMB"      (m 5!!2) "Live"    $ IText (d 5.rLive .slResources)
+    , Field 5 0 "allocatedMB"  "Allocd" "MB"     $ IText (d 5.rAlloc.slResources)
+    , Field 6 0 "allocMut"     "Alloc/" "mutSec" $ IText
+      (\SlotStats{..}->
+          d 5 $
+          (ceiling :: Float -> Int)
+          <$> ((/) <$> (fromIntegral . (100 *) <$> rAlloc slResources)
+                <*> (fromIntegral . max 1 . (1024 *) <$> rCentiMut slResources)))
+    , Field 7 0 "mempoolTxs"   "Mempool" "txs"   $ IWord64 slMempoolTxs
+    , Field 9 0 "utxoEntries"  "UTxO"  "entries" $ IWord64 slUtxoSize
+    , Field 10 0 "absSlotTime" "Absolute" "slot time" $ IText
+      (\SlotStats{..}->
+         T.pack $ " " `splitOn` show slStart !! 1)
+    ]
+   where
+     t w = nChunksEachOf 4 (w + 1) "mempool tx"
+     c w = nChunksEachOf 3 (w + 1) "%CPU"
+     g w = nChunksEachOf 2 (w + 1) "GCs"
+     m w = nChunksEachOf 3 (w + 1) "Memory use, MB"
+
+     d, f :: PrintfArg a => Int -> Maybe a -> Text
+     d width = \case
+       Just x  -> T.pack $ printf ("%"<>"" --(if exportMode then "0" else "")
+                                      <>show width<>"d") x
+       Nothing -> mconcat (replicate width "-")
+     f width = \case
+       Just x  -> T.pack $ printf ("%0."<>show width<>"f") x
+       Nothing -> mconcat (replicate width "-")
+
+     calcProd :: Float -> Float -> Float
+     calcProd mut' cpu' = if cpu' == 0 then 1 else mut' / cpu'
