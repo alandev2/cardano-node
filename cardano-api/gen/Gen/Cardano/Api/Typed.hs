@@ -488,7 +488,7 @@ genTxUpdateProposal era =
     Just supported ->
       Gen.choice
         [ pure TxUpdateProposalNone
-        , TxUpdateProposal supported <$> genUpdateProposal
+        , TxUpdateProposal supported <$> genUpdateProposal era
         ]
 
 genTxMintValue :: CardanoEra era -> Gen (TxMintValue BuildTx era)
@@ -515,7 +515,7 @@ genTxBodyContent era = do
   txMetadata <- genTxMetadataInEra era
   txAuxScripts <- genTxAuxScripts era
   let txExtraKeyWits = TxExtraKeyWitnessesNone --TODO: Alonzo era: Generate witness key hashes
-  txProtocolParams <- BuildTxWith <$> Gen.maybe genProtocolParameters
+  txProtocolParams <- BuildTxWith <$> Gen.maybe (genProtocolParameters era)
   txWithdrawals <- genTxWithdrawals era
   txCertificates <- genTxCertificates era
   txUpdateProposal <- genTxUpdateProposal era
@@ -698,8 +698,8 @@ genPraosNonce = makePraosNonce <$> Gen.bytes (Range.linear 0 32)
 genMaybePraosNonce :: Gen (Maybe PraosNonce)
 genMaybePraosNonce = Gen.maybe genPraosNonce
 
-genProtocolParameters :: Gen ProtocolParameters
-genProtocolParameters =
+genProtocolParameters :: CardanoEra era -> Gen ProtocolParameters
+genProtocolParameters era =
   ProtocolParameters
     <$> ((,) <$> genNat <*> genNat)
     <*> genRational
@@ -719,7 +719,7 @@ genProtocolParameters =
     <*> genRational
     <*> genRational
     <*> Gen.maybe genLovelace
-    <*> genCostModels
+    <*> genCostModels era
     <*> Gen.maybe genExecutionUnitPrices
     <*> Gen.maybe genExecutionUnits
     <*> Gen.maybe genExecutionUnits
@@ -727,8 +727,8 @@ genProtocolParameters =
     <*> Gen.maybe genNat
     <*> Gen.maybe genNat
 
-genProtocolParametersUpdate :: Gen ProtocolParametersUpdate
-genProtocolParametersUpdate = do
+genProtocolParametersUpdate :: CardanoEra era -> Gen ProtocolParametersUpdate
+genProtocolParametersUpdate era = do
   protocolUpdateProtocolVersion     <- Gen.maybe ((,) <$> genNat <*> genNat)
   protocolUpdateDecentralization    <- Gen.maybe genRational
   protocolUpdateExtraPraosEntropy   <- Gen.maybe genMaybePraosNonce
@@ -737,7 +737,7 @@ genProtocolParametersUpdate = do
   protocolUpdateMaxTxSize           <- Gen.maybe genNat
   protocolUpdateTxFeeFixed          <- Gen.maybe genNat
   protocolUpdateTxFeePerByte        <- Gen.maybe genNat
-  protocolUpdateMinUTxOValue        <- Gen.maybe genLovelace
+  protocolUpdateMinUTxOValue        <- preAlonzoParam era genLovelace
   protocolUpdateStakeAddressDeposit <- Gen.maybe genLovelace
   protocolUpdateStakePoolDeposit    <- Gen.maybe genLovelace
   protocolUpdateMinPoolCost         <- Gen.maybe genLovelace
@@ -746,23 +746,23 @@ genProtocolParametersUpdate = do
   protocolUpdatePoolPledgeInfluence <- Gen.maybe genRationalInt64
   protocolUpdateMonetaryExpansion   <- Gen.maybe genRational
   protocolUpdateTreasuryCut         <- Gen.maybe genRational
-  protocolUpdateUTxOCostPerWord     <- Gen.maybe genLovelace
-  protocolUpdateCostModels          <- genCostModels
-  protocolUpdatePrices              <- Gen.maybe genExecutionUnitPrices
-  protocolUpdateMaxTxExUnits        <- Gen.maybe genExecutionUnits
-  protocolUpdateMaxBlockExUnits     <- Gen.maybe genExecutionUnits
-  protocolUpdateMaxValueSize        <- Gen.maybe genNat
-  protocolUpdateCollateralPercent   <- Gen.maybe genNat
-  protocolUpdateMaxCollateralInputs <- Gen.maybe genNat
+  protocolUpdateUTxOCostPerWord     <- alonzoParam era genLovelace
+  protocolUpdateCostModels          <- genCostModels era
+  protocolUpdatePrices              <- alonzoParam era genExecutionUnitPrices
+  protocolUpdateMaxTxExUnits        <- alonzoParam era genExecutionUnits
+  protocolUpdateMaxBlockExUnits     <- alonzoParam era genExecutionUnits
+  protocolUpdateMaxValueSize        <- alonzoParam era genNat
+  protocolUpdateCollateralPercent   <- alonzoParam era genNat
+  protocolUpdateMaxCollateralInputs <- alonzoParam era genNat
   pure ProtocolParametersUpdate{..}
 
 
-genUpdateProposal :: Gen UpdateProposal
-genUpdateProposal =
+genUpdateProposal :: CardanoEra era -> Gen UpdateProposal
+genUpdateProposal era =
   UpdateProposal
     <$> Gen.map (Range.constant 1 3)
                 ((,) <$> genVerificationKeyHash AsGenesisKey
-                     <*> genProtocolParametersUpdate)
+                     <*> genProtocolParametersUpdate era)
     <*> genEpochNo
 
 genCostModel :: Gen CostModel
@@ -774,11 +774,13 @@ genCostModel = case Plutus.defaultCostModelParams of
     -- Plutus version we're using, once we support multiple Plutus versions.
     <$> mapM (const $ Gen.integral (Range.linear 0 5000)) dcm
 
-genCostModels :: Gen (Map AnyPlutusScriptVersion CostModel)
-genCostModels =
-    Gen.map (Range.linear 0 (length plutusScriptVersions))
-            ((,) <$> Gen.element plutusScriptVersions
-                 <*> genCostModel)
+genCostModels :: CardanoEra era -> Gen (Map AnyPlutusScriptVersion CostModel)
+genCostModels era
+  | anyCardanoEra era >= anyCardanoEra AlonzoEra =
+      Gen.map
+        (Range.linear 0 (length plutusScriptVersions))
+        ((,) <$> Gen.element plutusScriptVersions <*> genCostModel)
+  | otherwise = pure Map.empty
   where
     plutusScriptVersions :: [AnyPlutusScriptVersion]
     plutusScriptVersions = [minBound..maxBound]
@@ -786,6 +788,18 @@ genCostModels =
 genExecutionUnits :: Gen ExecutionUnits
 genExecutionUnits = ExecutionUnits <$> Gen.integral (Range.constant 0 1000)
                                    <*> Gen.integral (Range.constant 0 1000)
+
+-- | Gen for Alonzo-specific parameters
+alonzoParam :: CardanoEra era -> Gen a -> Gen (Maybe a)
+alonzoParam era gen
+  | anyCardanoEra era >= anyCardanoEra AlonzoEra = Just <$> gen
+  | otherwise = pure Nothing
+
+-- | 'Gen.maybe' but with condition if era is not Alonzo-based
+preAlonzoParam :: CardanoEra era -> Gen a -> Gen (Maybe a)
+preAlonzoParam era gen
+  | anyCardanoEra era >= anyCardanoEra AlonzoEra = pure Nothing
+  | otherwise = Gen.maybe gen
 
 genExecutionUnitPrices :: Gen ExecutionUnitPrices
 genExecutionUnitPrices = ExecutionUnitPrices <$> genRational <*> genRational
