@@ -39,6 +39,7 @@ module Gen.Cardano.Api.Typed
   , genStakeAddress
   , genTx
   , genTxBody
+  , genTxBodyContent
   , genValue
   , genValueDefault
   , genVerificationKey
