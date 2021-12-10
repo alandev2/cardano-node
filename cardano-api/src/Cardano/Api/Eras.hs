@@ -47,6 +47,7 @@ module Cardano.Api.Eras
 import           Prelude
 
 import           Data.Aeson (ToJSON, toJSON)
+import           Data.Function (on)
 import           Data.Type.Equality (TestEquality (..), (:~:) (Refl))
 
 import           Ouroboros.Consensus.Shelley.Eras as Ledger (StandardAllegra, StandardAlonzo,
@@ -225,6 +226,9 @@ instance Enum AnyCardanoEra where
          error $
             "AnyCardanoEra.toEnum: " <> show n
             <> " does not correspond to any known enumerated era."
+
+instance Ord AnyCardanoEra where
+   compare = compare `on` fromEnum
 
 instance ToJSON AnyCardanoEra where
    toJSON (AnyCardanoEra era) = toJSON era
