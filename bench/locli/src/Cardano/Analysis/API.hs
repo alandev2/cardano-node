@@ -23,6 +23,7 @@ import Ouroboros.Network.Block  (BlockNo(..))
 
 import Cardano.Analysis.ChainFilter
 import Cardano.Analysis.Profile
+import Cardano.Analysis.Version
 import Cardano.Logging.Resources.Types
 import Cardano.Unlog.LogObject  hiding (Text)
 import Cardano.Unlog.Render
@@ -36,7 +37,8 @@ import Data.Distribution
 -- | Results of block propagation analysis.
 data BlockPropagation
   = BlockPropagation
-    { bpSlotRange           :: !(SlotNo, SlotNo) -- ^ Analysis range, inclusive.
+    { bpVersion             :: !Version
+    , bpSlotRange           :: !(SlotNo, SlotNo) -- ^ Analysis range, inclusive.
     , bpForgerForges        :: !(Distribution Float NominalDiffTime)
     , bpForgerAdoptions     :: !(Distribution Float NominalDiffTime)
     , bpForgerAnnouncements :: !(Distribution Float NominalDiffTime)
@@ -143,7 +145,8 @@ data DataDomain
 -- | The top-level representation of the machine timeline analysis results.
 data MachTimeline
   = MachTimeline
-    { sSlotRange         :: (SlotNo, SlotNo) -- ^ Analysis range, inclusive.
+    { sVersion           :: !Version
+    , sSlotRange         :: (SlotNo, SlotNo) -- ^ Analysis range, inclusive.
     , sMaxChecks         :: !Word64
     , sSlotMisses        :: ![Word64]
     , sSpanLensCPU85     :: ![Int]

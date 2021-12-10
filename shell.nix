@@ -73,6 +73,7 @@ let
       cardano-ping
       cabalWrapped
       ghcid
+      haskellBuildUtils
       pkgs.graphviz
       weeder
       nixWrapped

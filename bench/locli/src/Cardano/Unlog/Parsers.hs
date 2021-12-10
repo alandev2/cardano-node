@@ -33,7 +33,6 @@ parseCommand :: Parser Command
 parseCommand =
   asum
     [ parseAnalysis
-    , parseDisplayVersion
     ]
 
 parseAnalysis :: Parser Command
@@ -47,21 +46,3 @@ parseAnalysis =
         "Log analysis"
          parseAnalysisCommands
     ]
-
-parseDisplayVersion :: Parser Command
-parseDisplayVersion =
-      subparser
-        (mconcat
-         [ commandGroup "Miscellaneous commands"
-         , metavar "Miscellaneous commands"
-         , command'
-           "version"
-           "Show the locli version"
-           (pure DisplayVersion)
-         ]
-        )
-  <|> flag' DisplayVersion
-        (  long "version"
-        <> help "Show the locli version"
-        <> hidden
-        )

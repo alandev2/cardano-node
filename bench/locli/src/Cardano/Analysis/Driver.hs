@@ -12,7 +12,8 @@ module Cardano.Analysis.Driver
   , runAnalysisCommand
   ) where
 
-import Prelude                          (String, error)
+import Prelude                          (String)
+import Prelude           qualified as P (error, head)
 import Cardano.Prelude
 
 import Control.Arrow                    ((&&&))
@@ -36,6 +37,7 @@ import Cardano.Analysis.BlockProp
 import Cardano.Analysis.ChainFilter
 import Cardano.Analysis.MachTimeline
 import Cardano.Analysis.Profile
+import Cardano.Analysis.Version
 import Cardano.Unlog.Commands
 import Cardano.Unlog.LogObject          hiding (Text)
 import Cardano.Unlog.Render
@@ -72,11 +74,27 @@ renderAnalysisCmdError cmd err =
               , mconcat (renderer cmdErr)
               ]
 
+-- | This estimates the run identifier, given the expected path structure.
+logfileRunIdentifier :: Text -> Text
+logfileRunIdentifier fp =
+  case drop (length xs - 3) xs of
+    rundir:_ -> rundir
+    _ -> fp
+ where
+   xs = T.split (== '/') fp
+
+textId :: FilePath -> Text
+textId inputfp = mconcat
+  [ "input: ", logfileRunIdentifier (T.pack inputfp), " "
+  , "locli: ", gitRev getVersion
+  ]
+
 --
 -- Analysis command dispatch
 --
 runAnalysisCommand :: AnalysisCommand -> ExceptT AnalysisCmdError IO ()
 runAnalysisCommand (MachineTimelineCmd genesisFile metaFile mChFiltersFile logfiles oFiles) = do
+  progress "run"     (Q . T.unpack . logfileRunIdentifier . T.pack . unJsonLogfile $ P.head logfiles)
   progress "genesis" (Q $ unJsonGenesisFile genesisFile)
   progress "meta"    (Q $ unJsonRunMetafile metaFile)
   chainInfo <-
@@ -99,6 +117,7 @@ runAnalysisCommand (MachineTimelineCmd genesisFile metaFile mChFiltersFile logfi
   firstExceptT AnalysisCmdError $
     runMachineTimeline chainInfo logfiles chFilters oFiles
 runAnalysisCommand (BlockPropagationCmd genesisFile metaFile mChFiltersFile logfiles oFiles) = do
+  progress "run"     (Q . T.unpack . logfileRunIdentifier . T.pack . unJsonLogfile $ P.head logfiles)
   progress "genesis" (Q $ unJsonGenesisFile genesisFile)
   progress "meta"    (Q $ unJsonRunMetafile metaFile)
   chainInfo <-
@@ -156,7 +175,7 @@ runBlockPropagation cInfo chConds logfiles BlockPropagationOutputFiles{..} = do
       \(TextOutputFile f) ->
         withFile f WriteMode $ \hnd -> do
           progress "pretty-timeline" (Q f)
-          hPutStrLn hnd . T.pack $ printf "--- input: %s" f
+          hPutStrLn hnd $ textId f
           mapM_ (T.hPutStrLn hnd)
             (renderDistributions (cProfile cInfo) RenderPretty blockPropagation)
           mapM_ (T.hPutStrLn hnd)
@@ -271,8 +290,7 @@ runMachineTimeline chainInfo logfiles chFilters MachineTimelineOutputFiles{..} =
    renderPrettyMachTimeline xs s (TextOutputFile f) =
      withFile f WriteMode $ \hnd -> do
        progress "pretty-timeline" (Q f)
-       hPutStrLn hnd . T.pack $
-         printf "--- input: %s" f
+       hPutStrLn hnd $ textId f
        mapM_ (T.hPutStrLn hnd)
          (renderDistributions p RenderPretty s)
        mapM_ (T.hPutStrLn hnd)
@@ -290,7 +308,7 @@ runMachineTimeline chainInfo logfiles chFilters MachineTimelineOutputFiles{..} =
            renderRunScalars rs
    renderExportTimeline :: [SlotStats] -> CsvOutputFile -> IO ()
    renderExportTimeline _xs (CsvOutputFile _o) =
-     error "Timeline export is not supported."
+     P.error "Timeline export is not supported."
      -- withFile o WriteMode $
      --   mapM_ (T.hPutStrLn hnd) (renderTimeline xs)
 

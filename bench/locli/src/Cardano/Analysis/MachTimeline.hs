@@ -27,6 +27,7 @@ import Data.Distribution
 
 import Cardano.Analysis.API
 import Cardano.Analysis.Profile
+import Cardano.Analysis.Version
 import Cardano.Unlog.LogObject hiding (Text)
 import Cardano.Unlog.Render
 import Cardano.Unlog.Resources
@@ -85,6 +86,7 @@ slotStatsMachTimeline CInfo{} slots =
       computeResDistrib stdPercentiles resDistProjs slots
   , sSpanLensCPU85EBndDistrib = computeDistribution stdPercentiles sSpanLensCPU85EBnd
   , sSpanLensCPU85RwdDistrib  = computeDistribution stdPercentiles sSpanLensCPU85Rwd
+  , sVersion          = getVersion
   }
  where
    sSpanLensCPU85EBnd = Vec.length <$>

@@ -25,6 +25,7 @@ library
                        Cardano.Analysis.ChainFilter
                        Cardano.Analysis.Driver
                        Cardano.Analysis.MachTimeline
+                       Cardano.Analysis.Version
 
                        Cardano.Unlog.Commands
                        Cardano.Unlog.LogObject

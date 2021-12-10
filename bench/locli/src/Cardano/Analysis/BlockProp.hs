@@ -52,6 +52,7 @@ import Data.Distribution
 import Cardano.Analysis.API
 import Cardano.Analysis.ChainFilter
 import Cardano.Analysis.Profile
+import Cardano.Analysis.Version
 import Cardano.Unlog.LogObject  hiding (Text)
 import Cardano.Unlog.Render
 import Cardano.Unlog.Resources
@@ -281,6 +282,7 @@ doBlockProp p cFilters eventMaps = do
       | p@(Perc p') <- adoptionPcts <> [Perc 1.0] ]
     , bpSizes               = forgerEventsCDF   (Just . bfBlockSize . beForge)
     , bpChainBlockEvents    = chain
+    , bpVersion             = getVersion
     }
  where
    chain, chainV :: [BlockEvents]
