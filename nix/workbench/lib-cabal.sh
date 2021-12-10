@@ -10,7 +10,7 @@ function workbench-prebuild-executables()
 
     echo -n "workbench:  prebuilding executables (because of useCabalRun): "
     unset NIX_ENFORCE_PURITY
-    for exe in tx-generator cardano-cli cardano-node cardano-topology locli
+    for exe in cardano-cli cardano-node cardano-topology
     do echo -n "$exe "
        cabal -v0 build -- exe:$exe 2>&1 >/dev/null |
            { grep -v 'Temporary modify'; true; } || return 1
