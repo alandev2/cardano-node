@@ -180,7 +180,6 @@ data SlotStats
     , slRejectedTx   :: !Word64
     , slBlockNo      :: !Word64
     , slBlockless    :: !Word64
-    , slOrderViol    :: !Word64
     , slEarliest     :: !UTCTime
     , slSpanCheck    :: !NominalDiffTime
     , slSpanLead     :: !NominalDiffTime

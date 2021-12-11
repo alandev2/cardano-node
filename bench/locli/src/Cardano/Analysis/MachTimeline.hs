@@ -185,7 +185,6 @@ timelineFromLogObjects ci =
      , slStart = SlotStart zeroUTCTime
      , slCountChecks = 0
      , slCountLeads = 0
-     , slOrderViol = 0
      , slEarliest = zeroUTCTime
      , slSpanCheck = realToFrac (0 :: Int)
      , slSpanLead = realToFrac (0 :: Int)
@@ -204,19 +203,18 @@ timelineFromLogObjects ci =
      }
 
 timelineStep :: ChainInfo -> TimelineAccum -> LogObject -> TimelineAccum
-timelineStep ci a@TimelineAccum{aSlotStats=cur:rSLs, ..} = \case
+timelineStep ci a@TimelineAccum{aSlotStats=ss@(cur:rSLs), ..} = \case
   LogObject{loAt, loBody=LOTraceStartLeadershipCheck slot utxo density} ->
     if      slot == slSlot cur     -- L-shipCheck for the current slot.
     then forTAHead a (onLeadershipCheck loAt)
     else if slot - slSlot cur == 1 -- L-shipCheck for the next slot.
     then addTimelineSlot ci slot loAt 1 utxo density a
     else if slot < slSlot cur      -- L-shipCheck for a slot we've gone by already.
-    then a { aSlotStats = cur
-             { slOrderViol = slOrderViol cur + 1 }
-             : -- Limited back-patching:
+    then a { aSlotStats =
+             -- Limited back-patching:
              mapNth (onLeadershipCheck loAt)
-                    (fromIntegral . unSlotNo $ slSlot cur - slot - 1)
-                    rSLs
+                    (fromIntegral . unSlotNo $ slSlot cur - slot)
+                    ss
            }
          -- L-shipCheck for a further-than-immediate future slot
     else let gap = unSlotNo $ slot - slSlot cur - 1
@@ -339,7 +337,6 @@ addTimelineSlot ci@CInfo{..} slot time checks utxo density a@TimelineAccum{..} =
         , slEpochSlot   = epochSlot
         , slStart       = slStart
         , slEarliest    = time
-        , slOrderViol   = 0
           -- Updated as we see repeats:
         , slCountChecks = checks
         , slCountLeads  = 0
