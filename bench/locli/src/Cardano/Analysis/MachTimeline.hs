@@ -144,11 +144,18 @@ data TimelineAccum
   , aTxsCollectedAt:: Map.Map TId UTCTime
   }
 
-mapTAHead :: (SlotStats -> SlotStats) -> TimelineAccum -> TimelineAccum
-mapTAHead f xs@TimelineAccum{aSlotStats=s:ss} = xs {aSlotStats=f s:ss}
-
 forTAHead :: TimelineAccum -> (SlotStats -> SlotStats) -> TimelineAccum
-forTAHead = flip mapTAHead
+forTAHead xs@TimelineAccum{aSlotStats=s:ss} f = xs {aSlotStats=f s:ss}
+
+forTANth :: TimelineAccum -> Int -> (SlotStats -> SlotStats) -> TimelineAccum
+forTANth xs@TimelineAccum{aSlotStats=ss} n f =
+  xs { aSlotStats = mapNth f n ss }
+ where
+   mapNth :: (a -> a) -> Int -> [a] -> [a]
+   mapNth f n xs =
+     case splitAt n xs of
+       (pre, x:post) -> pre <> (f x : post)
+       _ -> error $ "mapNth: couldn't go " <> show n <> "-deep into the timeline"
 
 data RunScalars
   = RunScalars
@@ -202,32 +209,31 @@ timelineFromLogObjects ci =
      , slBlockless = 0
      }
 
+
+
 timelineStep :: ChainInfo -> TimelineAccum -> LogObject -> TimelineAccum
-timelineStep ci a@TimelineAccum{aSlotStats=ss@(cur:rSLs), ..} = \case
+timelineStep ci a@TimelineAccum{aSlotStats=cur:_, ..} = \case
   LogObject{loAt, loBody=LOTraceStartLeadershipCheck slot utxo density} ->
     if      slot == slSlot cur     -- L-shipCheck for the current slot.
-    then forTAHead a (onLeadershipCheck loAt)
+    then forTAHead a
+         (registerLeadCheck loAt)
     else if slot - slSlot cur == 1 -- L-shipCheck for the next slot.
-    then addTimelineSlot ci slot loAt 1 utxo density a
+    then forTAHead (addTimelineSlot ci slot loAt 0 utxo density a)
+         (registerLeadCheck loAt)
     else if slot < slSlot cur      -- L-shipCheck for a slot we've gone by already.
-    then a { aSlotStats =
-             -- Limited back-patching:
-             mapNth (onLeadershipCheck loAt)
-                    (fromIntegral . unSlotNo $ slSlot cur - slot)
-                    ss
-           }
+    then forTANth a (fromIntegral . unSlotNo $ slSlot cur - slot)
+                  (registerLeadCheck loAt)
          -- L-shipCheck for a further-than-immediate future slot
     else let gap = unSlotNo $ slot - slSlot cur - 1
              gapStartSlot = slSlot cur + 1 in
-         addTimelineSlot ci slot loAt 1 utxo density $
-           -- We have a slot check gap to patch:
-           patchSlotCheckGap gap gapStartSlot a
+         patchSlotCheckGap gap gapStartSlot a
+         & addTimelineSlot ci slot loAt 1 utxo density
    where
-     mapNth :: (a -> a) -> Int -> [a] -> [a]
-     mapNth f n xs =
-       case splitAt n xs of
-         (pre, x:post) -> pre <> (f x : post)
-         _ -> error $ "mapNth: couldn't go " <> show n <> "-deep into the timeline"
+     registerLeadCheck :: UTCTime -> SlotStats -> SlotStats
+     registerLeadCheck now sl@SlotStats{..} =
+       sl { slCountChecks = slCountChecks + 1
+          , slSpanCheck = now `sinceSlot` slStart -- XXX: used to "max 0" this
+          }
 
      patchSlotCheckGap :: Word64 -> SlotNo -> TimelineAccum -> TimelineAccum
      patchSlotCheckGap gap slot a'@TimelineAccum{aSlotStats=cur':_} =
@@ -237,10 +243,16 @@ timelineStep ci a@TimelineAccum{aSlotStats=ss@(cur:rSLs), ..} = \case
                addTimelineSlot ci slot
                  (unSlotStart $ slotStart ci slot)
                  0 (slUtxoSize cur') (slDensity cur') a'
-  LogObject{loAt, loBody=LOTraceNodeIsLeader _} ->
-    forTAHead a (onLeadershipCertainty loAt True)
-  LogObject{loAt, loBody=LOTraceNodeNotLeader _} ->
-    forTAHead a (onLeadershipCertainty loAt False)
+  LogObject{loAt, loBody=LOTraceLeadershipDecided slot yesNo} ->
+    if slot /= slSlot cur
+    then error $ "LeadDecided for noncurrent slot=" <> show slot <> " cur=" <> show (slSlot cur)
+    else forTAHead a (onLeadershipCertainty loAt yesNo)
+   where
+     onLeadershipCertainty :: UTCTime -> Bool -> SlotStats -> SlotStats
+     onLeadershipCertainty now lead sl@SlotStats{..} =
+       sl { slCountLeads = slCountLeads + if lead then 1 else 0
+          , slSpanLead  = max 0 $ now `Time.diffUTCTime` (slSpanCheck `Time.addUTCTime` unSlotStart slStart)
+          }
   LogObject{loAt, loBody=LOResources rs} ->
     -- Update resource stats accumulators & record values current slot.
     (forTAHead a
@@ -311,18 +323,6 @@ timelineStep ci a@TimelineAccum{aSlotStats=ss@(cur:rSLs), ..} = \case
     { aTxsCollectedAt = loTid `Map.delete` aTxsCollectedAt
     }
   _ -> a
- where
-   onLeadershipCheck :: UTCTime -> SlotStats -> SlotStats
-   onLeadershipCheck now sl@SlotStats{..} =
-     sl { slCountChecks = slCountChecks + 1
-        , slSpanCheck = max 0 $ now `sinceSlot` slStart
-        }
-
-   onLeadershipCertainty :: UTCTime -> Bool -> SlotStats -> SlotStats
-   onLeadershipCertainty now lead sl@SlotStats{..} =
-     sl { slCountLeads = slCountLeads + if lead then 1 else 0
-        , slSpanLead  = max 0 $ now `Time.diffUTCTime` (slSpanCheck `Time.addUTCTime` unSlotStart slStart)
-        }
 timelineStep _ a = const a
 
 addTimelineSlot ::
@@ -340,7 +340,7 @@ addTimelineSlot ci@CInfo{..} slot time checks utxo density a@TimelineAccum{..} =
           -- Updated as we see repeats:
         , slCountChecks = checks
         , slCountLeads  = 0
-        , slSpanCheck   = max 0 $ time `sinceSlot` slStart
+        , slSpanCheck   = time `sinceSlot` slStart
         , slSpanLead    = 0
         , slTxsMemSpan  = Nothing
         , slTxsCollected= 0

@@ -13,7 +13,7 @@ import Prelude (String, error, head, id, show)
 import Cardano.Prelude hiding (Text, head, show)
 
 import Control.Monad (fail)
-import Data.Aeson (FromJSON(..), ToJSON(..), Value(..), Object, (.:))
+import Data.Aeson (FromJSON(..), ToJSON(..), Value(..), Object, (.:), (.:?))
 import Data.Aeson.Types (Parser)
 import Data.Aeson qualified as AE
 import Data.Aeson.Types qualified as AE
@@ -141,20 +141,22 @@ interpreters = Map.fromList
   [ (,) "TraceStartLeadershipCheck" $
     \v -> LOTraceStartLeadershipCheck
             <$> v .: "slot"
-            <*> v .: "utxoSize"
-            <*> v .: "chainDensity"
+            <*> (v .:? "utxoSize"     <&> fromMaybe 0)
+            <*> (v .:? "chainDensity" <&> fromMaybe 0)
 
   , (,) "TraceBlockContext" $
     \v -> LOBlockContext
             <$> v .: "tipBlockNo"
 
   , (,) "TraceNodeIsLeader" $
-    \v -> LOTraceNodeIsLeader
+    \v -> LOTraceLeadershipDecided
             <$> v .: "slot"
+            <*> pure True
 
   , (,) "TraceNodeNotLeader" $
-    \v -> LOTraceNodeNotLeader
+    \v -> LOTraceLeadershipDecided
             <$> v .: "slot"
+            <*> pure False
 
   , (,) "TraceMempoolAddedTx" $
     \v -> do
@@ -207,9 +209,9 @@ interpreters = Map.fromList
     \v -> LOBlockAddedToCurrentChain
             <$> ((v .: "newtip")     <&> hashFromPoint)
             <*> pure Nothing
-            <*> (v AE..:? "chainLengthDelta"
+            <*> (v .:? "chainLengthDelta"
                 -- Compat for node versions 1.27 and older:
-                 & fmap (fromMaybe 1))
+                 <&> fromMaybe 1)
   -- TODO: we should clarify the distinction between the two cases (^ and v).
   , (,) "TraceAdoptedBlock" $
     \v -> LOBlockAddedToCurrentChain
@@ -252,8 +254,7 @@ logObjectStreamInterpreterKeys = Map.keys interpreters
 
 data LOBody
   = LOTraceStartLeadershipCheck !SlotNo !Word64 !Float
-  | LOTraceNodeIsLeader !SlotNo
-  | LOTraceNodeNotLeader !SlotNo
+  | LOTraceLeadershipDecided    !SlotNo !Bool
   | LOResources !ResourceStats
   | LOMempoolTxs !Word64
   | LOMempoolRejectedTx
@@ -317,10 +318,10 @@ instance FromJSON LogObject where
    where
      unwrap :: Text -> Text -> Object -> Parser (Object, Text)
      unwrap wrappedKeyPred unwrapKey v = do
-       kind <- (fromText <$>) <$> v AE..:? "kind"
+       kind <- (fromText <$>) <$> v .:? "kind"
        wrapped   :: Maybe Text <-
-         (fromText <$>) <$> v AE..:? toText wrappedKeyPred
-       unwrapped :: Maybe Object <- v AE..:? toText unwrapKey
+         (fromText <$>) <$> v .:? toText wrappedKeyPred
+       unwrapped :: Maybe Object <- v .:? toText unwrapKey
        case (kind, wrapped, unwrapped) of
          (Nothing, Just _, Just x) -> (,) <$> pure x <*> (fromText <$> x .: "kind")
          (Just kind0, _, _) -> pure (v, kind0)
@@ -342,7 +343,7 @@ parsePartialResourceStates =
       <*> o .: "GcsMinor"
       <*> o .: "Alloc"
       <*> o .: "Live"
-      <*> (o AE..:? "Heap" & fmap (fromMaybe 0))
+      <*> (o .:? "Heap" <&> fromMaybe 0)
       <*> o .: "RSS"
       <*> o .: "CentiBlkIO"
       <*> o .: "Threads"
