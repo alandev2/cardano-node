@@ -26,7 +26,7 @@ import qualified Data.Aeson as Aeson
 import qualified Data.ByteString as BS
 import qualified Data.Text as T
 
-import           Control.Monad.Trans.Except.Extra (firstExceptT, handleIOExceptT, hoistEither,
+import           Control.Monad.Trans.Except.Extra (firstExceptT, handleIOExceptT, hoistEither, left,
                    newExceptT)
 
 import qualified Cardano.Crypto.Hash.Class as Crypto
@@ -47,7 +47,6 @@ import qualified Cardano.Api as Api (FileError (..))
 import           Cardano.Api.Orphans ()
 import qualified Cardano.Api.Protocol.Types as Protocol
 import           Cardano.Api.Shelley hiding (FileError)
-
 
 import           Cardano.Node.Types
 
@@ -132,9 +131,9 @@ validateGenesis genesis =
     firstExceptT GenesisValidationErrors . hoistEither $
       Shelley.validateGenesis genesis
 
-readLeaderCredentials :: Maybe ProtocolFilepaths
-                      -> ExceptT PraosLeaderCredentialsError IO
-                                 [TPraosLeaderCredentials StandardCrypto]
+readLeaderCredentials
+  :: Maybe ProtocolFilepaths
+  -> ExceptT PraosLeaderCredentialsError IO [TPraosLeaderCredentials StandardCrypto]
 readLeaderCredentials Nothing = return []
 readLeaderCredentials (Just pfp) =
   -- The set of credentials is a sum total of what comes from the CLI,
@@ -155,23 +154,43 @@ readLeaderCredentialsSingleton
      } = pure []
 -- Or to supply all of the files
 readLeaderCredentialsSingleton
-   ProtocolFilepaths
-     { shelleyCertFile      = Just certFile,
-       shelleyVRFFile       = Just vrfFile,
-       shelleyKESFile       = Just kesFile
-     } =
-     fmap (:[]) $
-     mkPraosLeaderCredentials
-       <$> firstExceptT FileError (newExceptT $ readFileTextEnvelope AsOperationalCertificate certFile)
-       <*> firstExceptT FileError (newExceptT $ readFileTextEnvelope (AsSigningKey AsVrfKey) vrfFile)
-       <*> firstExceptT FileError (newExceptT $ readFileTextEnvelope (AsSigningKey AsKesKey) kesFile)
+  ProtocolFilepaths { shelleyCertFile = Just opCertFile,
+                      shelleyVRFFile = Just vrfFile,
+                      shelleyKESFile = Just kesFile
+                    } = do
+    vrfSKey <-
+      firstExceptT FileError (newExceptT $ readFileTextEnvelope (AsSigningKey AsVrfKey) vrfFile)
+
+    (opCert, kesSKey) <- kesKeyCheck opCertFile kesFile
+
+    return [mkPraosLeaderCredentials opCert vrfSKey kesSKey]
+
 -- But not OK to supply some of the files without the others.
 readLeaderCredentialsSingleton ProtocolFilepaths {shelleyCertFile = Nothing} =
-     throwError OCertNotSpecified
+     left OCertNotSpecified
 readLeaderCredentialsSingleton ProtocolFilepaths {shelleyVRFFile = Nothing} =
-     throwError VRFKeyNotSpecified
+     left VRFKeyNotSpecified
 readLeaderCredentialsSingleton ProtocolFilepaths {shelleyKESFile = Nothing} =
-     throwError KESKeyNotSpecified
+     left KESKeyNotSpecified
+
+kesKeyCheck
+  :: FilePath
+  -- ^ KES key
+  -> FilePath
+  -- ^ Operational certificate
+  -> ExceptT PraosLeaderCredentialsError IO (OperationalCertificate, SigningKey KesKey)
+kesKeyCheck kesFile certFile = do
+  opCert <-
+    firstExceptT FileError (newExceptT $ readFileTextEnvelope AsOperationalCertificate certFile)
+  kesSKey <-
+    firstExceptT FileError (newExceptT $ readFileTextEnvelope (AsSigningKey AsKesKey) kesFile)
+  let opCertSpecifiedKesKeyhash = verificationKeyHash $ getHotKey opCert
+      suppliedKesKeyHash = verificationKeyHash $ getVerificationKey kesSKey
+  -- Specified KES key in operational certificate should match the one
+  -- supplied to the node.
+  if suppliedKesKeyHash /= opCertSpecifiedKesKeyhash
+  then left $ MismatchedKesKey kesFile certFile
+  else return (opCert, kesSKey)
 
 data ShelleyCredentials
   = ShelleyCredentials
@@ -180,26 +199,25 @@ data ShelleyCredentials
     , scKes  :: (TextEnvelope, FilePath)
     }
 
-readLeaderCredentialsBulk ::
-     ProtocolFilepaths
-  -> ExceptT PraosLeaderCredentialsError IO
-             [TPraosLeaderCredentials StandardCrypto]
+readLeaderCredentialsBulk
+  :: ProtocolFilepaths
+  -> ExceptT PraosLeaderCredentialsError IO [TPraosLeaderCredentials StandardCrypto]
 readLeaderCredentialsBulk ProtocolFilepaths { shelleyBulkCredsFile = mfp } =
   mapM parseShelleyCredentials =<< readBulkFile mfp
  where
-   parseShelleyCredentials ::
-        ShelleyCredentials
-     -> ExceptT PraosLeaderCredentialsError IO
-                (TPraosLeaderCredentials StandardCrypto)
+   parseShelleyCredentials
+     :: ShelleyCredentials
+     -> ExceptT PraosLeaderCredentialsError IO (TPraosLeaderCredentials StandardCrypto)
    parseShelleyCredentials ShelleyCredentials { scCert, scVrf, scKes } = do
+     _ <- kesKeyCheck (snd scCert) (snd scKes)
      mkPraosLeaderCredentials
        <$> parseEnvelope AsOperationalCertificate scCert
        <*> parseEnvelope (AsSigningKey AsVrfKey) scVrf
        <*> parseEnvelope (AsSigningKey AsKesKey) scKes
 
-   readBulkFile :: Maybe FilePath
-                -> ExceptT PraosLeaderCredentialsError IO
-                           [ShelleyCredentials]
+   readBulkFile
+     :: Maybe FilePath
+     -> ExceptT PraosLeaderCredentialsError IO [ShelleyCredentials]
    readBulkFile Nothing = pure []
    readBulkFile (Just fp) = do
      content <- handleIOExceptT (CredentialsReadError fp) $
@@ -300,6 +318,11 @@ data PraosLeaderCredentialsError =
      | OCertNotSpecified
      | VRFKeyNotSpecified
      | KESKeyNotSpecified
+     | MismatchedKesKey
+         FilePath
+         -- KES signing key
+         FilePath
+         -- Operational certificate
   deriving Show
 
 instance Error PraosLeaderCredentialsError where
@@ -312,7 +335,9 @@ instance Error PraosLeaderCredentialsError where
      <> toS fp <> " Error: " <> show err
 
   displayError (FileError fileErr) = displayError fileErr
-
+  displayError (MismatchedKesKey kesFp certFp) =
+       "The KES key provided at: " <> show kesFp
+    <> " does not match the KES key specified in the operational certificate at: " <> show certFp
   displayError OCertNotSpecified  = missingFlagMessage "shelley-operational-certificate"
   displayError VRFKeyNotSpecified = missingFlagMessage "shelley-vrf-key"
   displayError KESKeyNotSpecified = missingFlagMessage "shelley-kes-key"

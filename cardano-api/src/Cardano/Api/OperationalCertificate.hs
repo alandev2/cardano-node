@@ -9,6 +9,7 @@ module Cardano.Api.OperationalCertificate (
     OperationalCertificateIssueCounter(..),
     Shelley.KESPeriod(..),
     OperationalCertIssueError(..),
+    getHotKey,
     issueOperationalCertificate,
 
     -- * Data family instances
@@ -152,3 +153,7 @@ issueOperationalCertificate (KesVerificationKey kesVKey)
                     ShelleyNormalSigningKey poolSKey
                   Right (GenesisDelegateExtendedSigningKey delegSKey) ->
                     ShelleyExtendedSigningKey delegSKey
+
+getHotKey :: OperationalCertificate -> VerificationKey KesKey
+getHotKey (OperationalCertificate cert _) = KesVerificationKey $ Shelley.ocertVkHot cert
+
