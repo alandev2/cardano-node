@@ -1,0 +1,31 @@
+[ { "tag": "CSlot"
+  , "contents":
+    { "tag": "EpochGEq"
+    , "contents": 2
+    }
+  }
+, { "tag": "CSlot"
+  , "contents":
+    { "tag": "SlotLEq"
+    , "contents": 56000
+    }
+  }
+, { "tag": "CBlock"
+  , "contents":
+    { "tag": "BUnitaryChainDelta"
+    , "contents": true
+    }
+  }
+, { "tag": "CBlock"
+  , "contents":
+    { "tag": "BFullnessGEq"
+    , "contents": 0.03
+    }
+  }
+, { "tag": "CBlock"
+  , "contents":
+    { "tag": "BFullnessLEq"
+    , "contents": 0.1
+    }
+  }
+]
