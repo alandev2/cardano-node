@@ -1,4 +1,5 @@
 {-# LANGUAGE BlockArguments #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ImportQualifiedPost #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE NamedFieldPuns #-}
@@ -37,8 +38,9 @@ instance RenderDistributions MachTimeline where
   rdFields _ =
     --  Width LeftPad
     [ Field 4 0 "missR"    "Miss"  "ratio"  $ DFloat   sMissDistrib
-    , Field 6 0 "CheckΔ"   ""      "ChkΔt"  $ DDeltaT  sSpanCheckDistrib
-    , Field 6 0 "LeadΔ"    ""      "LeadΔt" $ DDeltaT  sSpanLeadDistrib
+    , Field 5 0 "CheckΔ"   (d!!0)  "Check"  $ DDeltaT  sSpanCheckDistrib
+    , Field 5 0 "LeadΔ"    (d!!1)  "Lead"   $ DDeltaT  sSpanLeadDistrib
+    , Field 5 0 "ForgeΔ"   (d!!2)  "Forge"  $ DDeltaT  sSpanForgeDistrib
     , Field 4 0 "BlkGap"   "Block" "gap"    $ DWord64  sBlocklessDistrib
     , Field 5 0 "chDensity" "Dens" "ity"    $ DFloat   sDensityDistrib
     , Field 3 0 "CPU"      "CPU"   "%"      $ DWord64 (rCentiCpu . sResourceDistribs)
@@ -54,42 +56,38 @@ instance RenderDistributions MachTimeline where
     , Field 5 0 "CPU85%LensEBnd" (c!!1) "EBnd"  $ DInt     sSpanLensCPU85EBndDistrib
     ]
    where
+     d = nChunksEachOf  3 6 "---- Δt ----"
      m = nChunksEachOf  3 6 "Memory usage, MB"
      c = nChunksEachOf  2 6 "CPU85% spans"
 
 slotStatsMachTimeline :: ChainInfo -> [SlotStats] -> MachTimeline
 slotStatsMachTimeline CInfo{} slots =
   MachTimeline
-  { sMaxChecks        = maxChecks
-  , sSlotMisses       = misses
-  , sSpanLensCPU85    = spanLensCPU85
-  , sSpanLensCPU85EBnd = sSpanLensCPU85EBnd
-  , sSpanLensCPU85Rwd  = sSpanLensCPU85Rwd
-  , sSlotRange        = (,) (slSlot $ head slots)
-                            (slSlot $ last slots)
+  { sMaxChecks            = maxChecks
+  , sSlotMisses           = misses
+  , sSpanLensCPU85        = spanLensCPU85
+  , sSpanLensCPU85EBnd    = sSpanLensCPU85EBnd
+  , sSpanLensCPU85Rwd     = sSpanLensCPU85Rwd
+  , sSlotRange            = (,) (slSlot $ head slots)
+                                (slSlot $ last slots)
+  , sVersion              = getVersion
   --
-  , sMissDistrib      = computeDistribution stdPercentiles missRatios
-  , sLeadsDistrib     =
-      computeDistribution stdPercentiles (slCountLeads <$> slots)
-  , sUtxoDistrib      =
-      computeDistribution stdPercentiles (slUtxoSize <$> slots)
-  , sDensityDistrib   =
-      computeDistribution stdPercentiles (slDensity <$> slots)
-  , sSpanCheckDistrib =
-      computeDistribution stdPercentiles (slSpanCheck <$> slots)
-  , sSpanLeadDistrib =
-      computeDistribution stdPercentiles (slSpanLead <$> slots)
-  , sBlocklessDistrib =
-      computeDistribution stdPercentiles (slBlockless <$> slots)
-  , sSpanLensCPU85Distrib
-                      = computeDistribution stdPercentiles spanLensCPU85
-  , sResourceDistribs =
-      computeResDistrib stdPercentiles resDistProjs slots
-  , sSpanLensCPU85EBndDistrib = computeDistribution stdPercentiles sSpanLensCPU85EBnd
-  , sSpanLensCPU85RwdDistrib  = computeDistribution stdPercentiles sSpanLensCPU85Rwd
-  , sVersion          = getVersion
+  , sMissDistrib          = dist missRatios
+  , sLeadsDistrib         = dist (slCountLeads <$> slots)
+  , sUtxoDistrib          = dist (slUtxoSize <$> slots)
+  , sDensityDistrib       = dist (slDensity <$> slots)
+  , sSpanCheckDistrib     = dist (slSpanCheck <$> slots)
+  , sSpanLeadDistrib      = dist (slSpanLead <$> slots)
+  , sSpanForgeDistrib     = dist (filter (/= 0) $ slSpanForge <$> slots)
+  , sBlocklessDistrib     = dist (slBlockless <$> slots)
+  , sSpanLensCPU85Distrib = dist spanLensCPU85
+  , sSpanLensCPU85EBndDistrib = dist sSpanLensCPU85EBnd
+  , sSpanLensCPU85RwdDistrib  = dist sSpanLensCPU85Rwd
+  , sResourceDistribs         = computeResDistrib stdPercentiles resDistProjs slots
   }
  where
+   dist :: (Real a, ToRealFrac a Float) => [a] -> Distribution Float a
+   dist = computeDistribution stdPercentiles
    sSpanLensCPU85EBnd = Vec.length <$>
                         filter (spanContainsEpochSlot 3) spansCPU85
    sSpanLensCPU85Rwd  = Vec.length <$>
@@ -192,9 +190,11 @@ timelineFromLogObjects ci =
      , slStart = SlotStart zeroUTCTime
      , slCountChecks = 0
      , slCountLeads = 0
+     , slCountForges = 0
      , slEarliest = zeroUTCTime
      , slSpanCheck = realToFrac (0 :: Int)
      , slSpanLead = realToFrac (0 :: Int)
+     , slSpanForge = realToFrac (0 :: Int)
      , slMempoolTxs = 0
      , slTxsMemSpan = Nothing
      , slTxsCollected = 0
@@ -236,13 +236,12 @@ timelineStep ci a@TimelineAccum{aSlotStats=cur:_, ..} = \case
           }
 
      patchSlotCheckGap :: Word64 -> SlotNo -> TimelineAccum -> TimelineAccum
-     patchSlotCheckGap gap slot a'@TimelineAccum{aSlotStats=cur':_} =
-       case gap of
-         0 -> a'
-         n -> patchSlotCheckGap (n - 1) (slot + 1) $
-               addTimelineSlot ci slot
-                 (unSlotStart $ slotStart ci slot)
-                 0 (slUtxoSize cur') (slDensity cur') a'
+     patchSlotCheckGap 0 _ a' = a'
+     patchSlotCheckGap gapLen slot a'@TimelineAccum{aSlotStats=cur':_} =
+       patchSlotCheckGap (gapLen - 1) (slot + 1) $
+        addTimelineSlot ci slot
+          (unSlotStart $ slotStart ci slot)
+          0 (slUtxoSize cur') (slDensity cur') a'
   LogObject{loAt, loBody=LOTraceLeadershipDecided slot yesNo} ->
     if slot /= slSlot cur
     then error $ "LeadDecided for noncurrent slot=" <> show slot <> " cur=" <> show (slSlot cur)
@@ -251,8 +250,24 @@ timelineStep ci a@TimelineAccum{aSlotStats=cur:_, ..} = \case
      onLeadershipCertainty :: UTCTime -> Bool -> SlotStats -> SlotStats
      onLeadershipCertainty now lead sl@SlotStats{..} =
        sl { slCountLeads = slCountLeads + if lead then 1 else 0
-          , slSpanLead  = max 0 $ now `Time.diffUTCTime` (slSpanCheck `Time.addUTCTime` unSlotStart slStart)
+          , slSpanLead   = checkToCertainty
           }
+      where
+        checkAbsTime = slSpanCheck `Time.addUTCTime` unSlotStart slStart
+        checkToCertainty = now `Time.diffUTCTime` checkAbsTime
+  LogObject{loAt, loBody=LOBlockForged _ _ _ slot} ->
+    if slot /= slSlot cur
+    then error $ "BlockForged for noncurrent slot=" <> show slot <> " cur=" <> show (slSlot cur)
+    else forTAHead a (onBlockForge loAt)
+   where
+     onBlockForge :: UTCTime -> SlotStats -> SlotStats
+     onBlockForge now sl@SlotStats{..} =
+       sl { slCountForges = slCountForges + 1
+          , slSpanForge   = certaintyToForge
+          }
+      where
+        certaintyAbsTime = slSpanLead `Time.addUTCTime` (slSpanCheck `Time.addUTCTime` unSlotStart slStart)
+        certaintyToForge = now `Time.diffUTCTime` certaintyAbsTime
   LogObject{loAt, loBody=LOResources rs} ->
     -- Update resource stats accumulators & record values current slot.
     (forTAHead a
@@ -340,8 +355,10 @@ addTimelineSlot ci@CInfo{..} slot time checks utxo density a@TimelineAccum{..} =
           -- Updated as we see repeats:
         , slCountChecks = checks
         , slCountLeads  = 0
+        , slCountForges = 0
         , slSpanCheck   = time `sinceSlot` slStart
         , slSpanLead    = 0
+        , slSpanForge   = 0
         , slTxsMemSpan  = Nothing
         , slTxsCollected= 0
         , slTxsAccepted = 0

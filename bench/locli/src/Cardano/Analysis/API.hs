@@ -159,6 +159,7 @@ data MachTimeline
     , sDensityDistrib    :: !(Distribution Float Float)
     , sSpanCheckDistrib  :: !(Distribution Float NominalDiffTime)
     , sSpanLeadDistrib   :: !(Distribution Float NominalDiffTime)
+    , sSpanForgeDistrib  :: !(Distribution Float NominalDiffTime)
     , sBlocklessDistrib  :: !(Distribution Float Word64)
     , sSpanLensCPU85Distrib
                          :: !(Distribution Float Int)
@@ -176,6 +177,7 @@ data SlotStats
     , slStart        :: !SlotStart
     , slCountChecks  :: !Word64
     , slCountLeads   :: !Word64
+    , slCountForges  :: !Word64
     , slChainDBSnap  :: !Word64
     , slRejectedTx   :: !Word64
     , slBlockNo      :: !Word64
@@ -183,6 +185,7 @@ data SlotStats
     , slEarliest     :: !UTCTime
     , slSpanCheck    :: !NominalDiffTime
     , slSpanLead     :: !NominalDiffTime
+    , slSpanForge    :: !NominalDiffTime
     , slMempoolTxs   :: !Word64
     , slTxsMemSpan   :: !(Maybe NominalDiffTime)
     , slTxsCollected :: !Word64
@@ -347,10 +350,12 @@ instance RenderTimeline SlotStats where
     , Field 5 0 "blockGap"     "block" "gap"     $ IWord64 slBlockless
     , Field 3 0 "leadChecks"   "lead"  "chk"     $ IWord64 slCountChecks
     , Field 3 0 "leadShips"    "ship"  "win"     $ IWord64 slCountLeads
+    , Field 3 0 "forges"       "For"   "ge"      $ IWord64 slCountForges
     , Field 4 0 "CDBSnap"      "CDB"   "snap"    $ IWord64 slChainDBSnap
     , Field 3 0 "rejTxs"       "rej"   "txs"     $ IWord64 slRejectedTx
     , Field 7 0 "checkSpan"    "check" "span"    $ IDeltaT slSpanCheck
     , Field 5 0 "leadSpan"     "lead"  "span"    $ IDeltaT slSpanLead
+    , Field 5 0 "forgeSpan"    "forg"  "span"    $ IDeltaT slSpanForge
     , Field 4 0 "mempoolTxSpan" (t 4!!0) "span"  $ IText (maybe "" show.slTxsMemSpan)
     , Field 4 0 "txsColl"     (t 4!!1) "cold"    $ IWord64 slTxsCollected
     , Field 4 0 "txsAcc"      (t 4!!2) "accd"    $ IWord64 slTxsAccepted
