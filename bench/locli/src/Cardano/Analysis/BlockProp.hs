@@ -288,7 +288,12 @@ doBlockProp p cFilters eventMaps = do
    chain, chainV :: [BlockEvents]
    chain          = rebuildChain (fmap deltifyEvents <$> eventMaps) tipHash
                     & computeChainBlockGaps
-   chainV         = filter (isValidBlockEvent p cFilters) chain
+   chainV         = filter (isValidBlockEvent p cFilters) chain &
+                    \case
+                      [] -> error $ mconcat
+                        ["All ", show (length chain)
+                        , " blocks dropped by chain filters: ", show cFilters]
+                      xs -> xs
 
    forgerEventsCDF   :: (Real a, ToRealFrac a Float) => (BlockEvents -> Maybe a) -> Distribution Float a
    forgerEventsCDF   = mapChainToBlockEventCDF           stdPercentiles chainV
