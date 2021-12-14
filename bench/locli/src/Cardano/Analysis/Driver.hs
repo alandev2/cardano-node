@@ -1,3 +1,4 @@
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE ImportQualifiedPost #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -105,7 +106,7 @@ runAnalysisCommand (MachineTimelineCmd genesisFile metaFile mChFiltersFile logfi
       <*> firstExceptT (GenesisParseError genesisFile . T.pack)
                        (newExceptT $
                         AE.eitherDecode @Genesis <$> LBS.readFile (unJsonGenesisFile genesisFile))
-  liftIO $ LBS.putStrLn (AE.encode chainInfo)
+  progress "chain"   (J $ chainInfo)
 
   chFilters <- fmap (fromMaybe []) $
     forM mChFiltersFile $
@@ -113,6 +114,7 @@ runAnalysisCommand (MachineTimelineCmd genesisFile metaFile mChFiltersFile logfi
         firstExceptT (ChainFiltersParseError jf . T.pack)
                      (newExceptT $
                         AE.eitherDecode @[ChainFilter] <$> LBS.readFile f)
+  progress "filters" (J $ chFilters)
 
   firstExceptT AnalysisCmdError $
     runMachineTimeline chainInfo logfiles chFilters oFiles
@@ -128,7 +130,7 @@ runAnalysisCommand (BlockPropagationCmd genesisFile metaFile mChFiltersFile logf
       <*> firstExceptT (GenesisParseError genesisFile . T.pack)
                        (newExceptT $
                         AE.eitherDecode @Genesis <$> LBS.readFile (unJsonGenesisFile genesisFile))
-  liftIO $ LBS.putStrLn (AE.encode chainInfo)
+  progress "chain"   (J $ chainInfo)
 
   chFilters <- fmap (fromMaybe []) $
     forM mChFiltersFile $
@@ -136,6 +138,7 @@ runAnalysisCommand (BlockPropagationCmd genesisFile metaFile mChFiltersFile logf
         firstExceptT (ChainFiltersParseError jf . T.pack)
                      (newExceptT $
                         AE.eitherDecode @[ChainFilter] <$> LBS.readFile f)
+  progress "filters" (J $ chFilters)
 
   firstExceptT AnalysisCmdError $
     runBlockPropagation chainInfo chFilters logfiles oFiles
@@ -152,7 +155,7 @@ runAnalysisCommand (ChainInfoCmd genesisFile metaFile) = do
       <*> firstExceptT (GenesisParseError genesisFile . T.pack)
                        (newExceptT $
                         AE.eitherDecode @Genesis <$> LBS.readFile (unJsonGenesisFile genesisFile))
-  liftIO $ LBS.putStrLn (AE.encode chainInfo)
+  progress "chain"   (J $ chainInfo)
 
 runBlockPropagation ::
   ChainInfo -> [ChainFilter] -> [JsonLogfile] -> BlockPropagationOutputFiles -> ExceptT Text IO ()
@@ -194,12 +197,14 @@ data F
   = R String
   | Q String
   | L [String]
+  | forall a. AE.ToJSON a => J a
 
 progress :: MonadIO m => String -> F -> m ()
 progress key = putStrLn . T.pack . \case
   R x  -> printf "{ \"%s\":  %s }"    key x
   Q x  -> printf "{ \"%s\": \"%s\" }" key x
   L xs -> printf "{ \"%s\": \"%s\" }" key (intercalate "\", \"" xs)
+  J x  -> printf "{ \"%s\": %s }" key (LBS.unpack $ AE.encode x)
 
 runMachineTimeline ::
   ChainInfo -> [JsonLogfile] -> [ChainFilter] -> MachineTimelineOutputFiles -> ExceptT Text IO ()
