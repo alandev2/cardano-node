@@ -39,6 +39,8 @@ data BlockPropagation
   = BlockPropagation
     { bpVersion             :: !Version
     , bpSlotRange           :: !(SlotNo, SlotNo) -- ^ Analysis range, inclusive.
+    , bpForgerChecks        :: !(Distribution Float NominalDiffTime)
+    , bpForgerLeads         :: !(Distribution Float NominalDiffTime)
     , bpForgerForges        :: !(Distribution Float NominalDiffTime)
     , bpForgerAdoptions     :: !(Distribution Float NominalDiffTime)
     , bpForgerAnnouncements :: !(Distribution Float NominalDiffTime)
@@ -78,7 +80,9 @@ data BlockForge
   , bfSlotStart    :: !SlotStart
   , bfBlockGap     :: !NominalDiffTime -- ^ Since previous forge event
   , bfBlockSize    :: !Int             -- ^ Bytes
-  , bfForged       :: !NominalDiffTime -- ^ Since slot start
+  , bfChecked      :: !NominalDiffTime -- ^ Since slot start
+  , bfLeading      :: !NominalDiffTime -- ^ Since check
+  , bfForged       :: !NominalDiffTime -- ^ Since leading
   , bfAdopted      :: !NominalDiffTime -- ^ Since forging
   , bfChainDelta   :: !Int             -- ^ ChainDelta during adoption
   , bfAnnounced    :: !NominalDiffTime -- ^ Since adoption
@@ -245,10 +249,12 @@ testSlotStats Profile{genesis=GenesisProfile{}}
 instance RenderDistributions BlockPropagation where
   rdFields _ =
     --  Width LeftPad
-    [ Field 6 0 "forged"        (f!!0) "Forge"  $ DDeltaT bpForgerForges
-    , Field 6 0 "fAdopted"      (f!!1) "Adopt"  $ DDeltaT bpForgerAdoptions
-    , Field 6 0 "fAnnounced"    (f!!2) "Announ" $ DDeltaT bpForgerAnnouncements
-    , Field 6 0 "fSendStart"    (f!!3) "Sendin" $ DDeltaT bpForgerSends
+    [ Field 6 0 "fChecked"      (f!!0) "Checkd" $ DDeltaT bpForgerChecks
+    , Field 6 0 "fLeading"      (f!!1) "Leadin" $ DDeltaT bpForgerLeads
+    , Field 6 0 "fForged"       (f!!2) "Forge"  $ DDeltaT bpForgerForges
+    , Field 6 0 "fAdopted"      (f!!3) "Adopt"  $ DDeltaT bpForgerAdoptions
+    , Field 6 0 "fAnnounced"    (f!!4) "Announ" $ DDeltaT bpForgerAnnouncements
+    , Field 6 0 "fSendStart"    (f!!5) "Sendin" $ DDeltaT bpForgerSends
     , Field 5 0 "noticedVal"    (p!!0) "Notic"  $ DDeltaT bpPeerNotices
     , Field 5 0 "requestedVal"  (p!!1) "Reque"  $ DDeltaT bpPeerRequests
     , Field 5 0 "fetchedVal"    (p!!2) "Fetch"  $ DDeltaT bpPeerFetches
@@ -268,8 +274,8 @@ instance RenderDistributions BlockPropagation where
     [ Field 9 0 "sizes"         "Size"  "bytes" $ DInt    bpSizes
     ]
    where
-     f = nChunksEachOf 4    7 "Forger event Δt:"
-     p = nChunksEachOf 6    6 "Peer event Δt:"
+     f = nChunksEachOf 6    7 "--- Forger event Δt: ---"
+     p = nChunksEachOf 6    6 "--- Peer event Δt: ---"
      r = nChunksEachOf aLen 6 "Slot-rel. Δt to adoption centile:"
      aLen = length adoptionPcts + 1 -- +1 is for the implied 1.0 percentile
 
@@ -288,10 +294,12 @@ instance RenderTimeline BlockEvents where
     , Field 9 0 "blockSize"    "size"  "bytes"  $ IInt    (bfBlockSize . beForge)
     , Field 7 0 "blockGap"     "block" "gap"    $ IDeltaT (bfBlockGap  . beForge)
     , Field 3 0 "forks"         "for"  "-ks"    $ IInt   (count bpeIsFork . beErrors)
-    , Field 6 0 "forged"        (f!!0) "Forge"  $ IDeltaT (bfForged    . beForge)
-    , Field 6 0 "fAdopted"      (f!!1) "Adopt"  $ IDeltaT (bfAdopted   . beForge)
-    , Field 6 0 "fAnnounced"    (f!!2) "Announ" $ IDeltaT (bfAnnounced . beForge)
-    , Field 6 0 "fSendStart"    (f!!3) "Sendin" $ IDeltaT (bfSending   . beForge)
+    , Field 6 0 "fChecked"      (f!!0) "Check"  $ IDeltaT (bfChecked   . beForge)
+    , Field 6 0 "fLeading"      (f!!1) "Lead"   $ IDeltaT (bfLeading   . beForge)
+    , Field 6 0 "fForged"       (f!!2) "Forge"  $ IDeltaT (bfForged    . beForge)
+    , Field 6 0 "fAdopted"      (f!!3) "Adopt"  $ IDeltaT (bfAdopted   . beForge)
+    , Field 6 0 "fAnnounced"    (f!!4) "Announ" $ IDeltaT (bfAnnounced . beForge)
+    , Field 6 0 "fSendStart"    (f!!5) "Sendin" $ IDeltaT (bfSending   . beForge)
     , Field 5 0 "valid.observ" "valid" "obsrv"  $ IInt    (length          . valids)
     , Field 5 0 "noticedVal"    (p!!0) "Notic"  $ IDeltaT (af  boNoticed   . valids)
     , Field 5 0 "requestedVal"  (p!!1) "Requd"  $ IDeltaT (af  boRequested . valids)
@@ -311,7 +319,7 @@ instance RenderTimeline BlockEvents where
     ]
    where
      valids = filter isValidBlockObservation . beObservations
-     f = nChunksEachOf 4 7 "Forger event Δt:"
+     f = nChunksEachOf 6 7 "--- Forger event Δt: ---"
      p = nChunksEachOf 6 6 "Peer event Δt averages:"
      r = nChunksEachOf 3 6 "Propagation Δt:"
      m = nChunksEachOf 3 4 "Missing"
