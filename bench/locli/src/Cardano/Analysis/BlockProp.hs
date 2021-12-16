@@ -100,7 +100,8 @@ data ObserverEvents a
   , boeChainDelta :: !Int
   , boeAnnounced  :: !(Maybe a)
   , boeSending    :: !(Maybe a)
-  , boeErrs       :: [BPError]
+  , boeErrorsCrit :: [BPError]
+  , boeErrorsSoft :: [BPError]
   }
   deriving (Generic, NFData, FromJSON, ToJSON, Show)
 
@@ -402,7 +403,8 @@ doBlockProp p cFilters machViews = do
              <*> Just boeChainDelta
              <*> Just boeAnnounced
              <*> Just boeSending
-             <*> Just boeErrs
+             <*> Just boeErrorsCrit
+             <*> Just boeErrorsSoft
      , bePropagation  = computeDistribution adoptionPcts adoptions
      , beOtherBlocks  = otherBlocks
      , beErrors =
@@ -411,7 +413,8 @@ doBlockProp p cFilters machViews = do
              \blk ->
                fail' (findForger blk) bfeBlock $ BPEFork blk)
          <> bfeErrs
-         <> concatMap boeErrs os
+         <> concatMap boeErrorsCrit os
+         <> concatMap boeErrorsSoft os
      }
     where
       adoptions    =
@@ -467,7 +470,7 @@ blockPropMachEventsStep ci@CInfo{..} (JsonLogfile fp) mv@MachView{..} lo = case 
        (ObserverEvents
         loHost loBlock loBlockNo loSlotNo
         (slotStart ci loSlotNo) (Just loAt)
-        Nothing Nothing Nothing 0 Nothing Nothing [])
+        Nothing Nothing Nothing 0 Nothing Nothing [] [])
       & doInsert loBlock
   -- 1. Request (observer only)
   LogObject{loAt, loHost, loBody=LOBlockFetchClientRequested{loBlock,loLength}} ->
@@ -598,8 +601,9 @@ deltifyEvents (MOE x@ObserverEvents{..}) =
   , boeAnnounced = diffUTCTime <$> boeAnnounced <*> boeAdopted
   , boeSending   = diffUTCTime <$> boeSending   <*> boeAnnounced
   } & \case
-  v@(MOE x') -> MOE x' { boeErrs = collectEventErrors v
-                         [Notice, Request, Fetch, Adopt, Announce, Send] }
+  v@(MOE x') ->
+    MOE x' { boeErrorsCrit = collectEventErrors v [Notice, Request, Fetch, Adopt]
+           , boeErrorsSoft = collectEventErrors v [Announce, Send]}
   _ -> error "Impossible"
 
 collectEventErrors :: MachBlockEvents NominalDiffTime -> [Phase] -> [BPError]

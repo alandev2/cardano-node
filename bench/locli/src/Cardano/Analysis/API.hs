@@ -101,7 +101,8 @@ data BlockObservation
   , boChainDelta :: !Int                     -- ^ ChainDelta during adoption
   , boAnnounced  :: !(Maybe NominalDiffTime) -- ^ Since adoption
   , boSending    :: !(Maybe NominalDiffTime) -- ^ Since announcement
-  , boErrors     :: [BPError]
+  , boErrorsCrit :: [BPError]
+  , boErrorsSoft :: [BPError]
   }
   deriving (Generic, FromJSON, ToJSON, Show)
 
@@ -229,7 +230,7 @@ isValidBlockEvent p criteria be =
 isValidBlockObservation :: BlockObservation -> Bool
 isValidBlockObservation BlockObservation{..} =
   -- 1. All phases are present
-  null boErrors
+  null boErrorsCrit
   &&
   -- 2. All timings account for processing of a single block
   boChainDelta == 1
